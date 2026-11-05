@@ -6,7 +6,7 @@ import { api, HttpError } from '../lib/api'
 import { formatBytes, formatPct, formatRate, formatUnit, formatUptime, platformLabel } from '../lib/format'
 import { livePointFromFrame } from '../lib/overview'
 import { go, machinePath, RANGES, type Range } from '../lib/router'
-import { chartSpecs, LiveBuffer, type ChartSpec } from '../lib/series'
+import { chartSpecs, isIdle, LiveBuffer, type ChartSpec } from '../lib/series'
 import { onSample, removeMachine, store } from '../lib/store'
 
 const props = defineProps<{ name: string; range: Range }>()
@@ -88,7 +88,10 @@ onBeforeUnmount(() => {
 })
 
 /** Charts whose keys have no points in this range (old disks, interfaces) are hidden. */
-const visible = computed(() => specs.value.filter((s) => s.series.some((x) => (data.value[x.key]?.length ?? 0) > 0)))
+const withData = computed(() => specs.value.filter((s) => s.series.some((x) => (data.value[x.key]?.length ?? 0) > 0)))
+/** Network interfaces with no traffic at all in this range are hidden too. */
+const idleNets = computed(() => withData.value.filter((s) => s.id.startsWith('net:') && isIdle(s, data.value)))
+const visible = computed(() => withData.value.filter((s) => !idleNets.value.includes(s)))
 const mainCharts = computed(() => visible.value.filter((s) => !s.collapsed))
 const coreChart = computed(() => visible.value.find((s) => s.collapsed))
 
@@ -174,6 +177,10 @@ async function remove() {
       </div>
     </section>
 
+    <p v-if="idleNets.length" class="muted idle">
+      Hidden, idle in this range (under 1 KB/s): {{ idleNets.map((s) => s.id.slice(4)).join(', ') }}
+    </p>
+
     <section v-if="latest?.docker" class="panel">
       <h2>Containers <span class="muted">{{ containers.filter((c) => c.state === 'running').length }} / {{ containers.length }} running</span></h2>
       <DataTable :columns="containerCols" :rows="containers" :dim="(r) => r.state !== 'running'" initial-sort="name" />
@@ -217,6 +224,7 @@ h2 .cur { float: right; font-weight: 600; }
 .toggle { font-size: 12px; margin: 6px 0; }
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; }
 .foot { margin: 12px 0 0; text-align: right; }
+.idle { font-size: 12px; margin: 0 0 12px; }
 .danger { color: var(--crit); }
 .err { color: var(--crit); }
 .center { text-align: center; padding: 48px 16px; }

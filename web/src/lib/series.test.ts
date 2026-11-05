@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { alignSeries, chartSpecs, LiveBuffer, withGaps } from './series'
+import { alignSeries, chartSpecs, isIdle, LiveBuffer, withGaps } from './series'
 
 describe('chartSpecs', () => {
   it('groups known keys in order', () => {
@@ -74,5 +74,27 @@ describe('LiveBuffer', () => {
     expect(b.series('mem.used')).toEqual([[110, 7]])
     expect(b.keys().sort()).toEqual(['cpu.total', 'mem.used'])
     expect(b.latest).toBe(110)
+  })
+})
+
+describe('isIdle', () => {
+  const spec = chartSpecs(['net.wg0.rx_bps', 'net.wg0.tx_bps'])[0]
+  it('is idle when every point is zero or missing', () => {
+    expect(isIdle(spec, { 'net.wg0.rx_bps': [[0, 0], [5, 0]], 'net.wg0.tx_bps': [] })).toBe(true)
+    expect(isIdle(spec, { 'net.wg0.rx_bps': [[0, 0, 0], [60, 0, 0]] })).toBe(true)
+  })
+  it('is not idle when any point or peak reaches 1 KB/s', () => {
+    expect(isIdle(spec, { 'net.wg0.rx_bps': [[0, 0], [5, 4096]] })).toBe(false)
+    expect(isIdle(spec, { 'net.wg0.tx_bps': [[0, 0, 2048]] })).toBe(false)
+  })
+})
+
+describe('isIdle threshold', () => {
+  const spec = chartSpecs(['net.wg0.rx_bps', 'net.wg0.tx_bps'])[0]
+  it('treats keep-alive trickles below 1 KB/s as idle', () => {
+    expect(isIdle(spec, { 'net.wg0.rx_bps': [[0, 40], [5, 300]], 'net.wg0.tx_bps': [[0, 1023]] })).toBe(true)
+  })
+  it('a single burst of 1 KB/s or more counts as traffic', () => {
+    expect(isIdle(spec, { 'net.wg0.rx_bps': [[0, 40], [5, 1024]] })).toBe(false)
   })
 })

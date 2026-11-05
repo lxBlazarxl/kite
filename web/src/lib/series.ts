@@ -165,3 +165,11 @@ export class LiveBuffer {
     }
   }
 }
+
+/** Below this rate a link is idle: VPN keep-alives, stray broadcasts. */
+export const IDLE_BPS = 1024
+
+/** True when no value (and no peak, for averaged rows) of a chart reaches IDLE_BPS. */
+export function isIdle(spec: ChartSpec, data: Record<string, number[][]>): boolean {
+  return spec.series.every((s) => (data[s.key] ?? []).every((row) => row.slice(1).every((v) => !(v >= IDLE_BPS))))
+}
