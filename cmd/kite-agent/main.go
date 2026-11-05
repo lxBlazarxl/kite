@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/retransmit/kite/internal/agent"
@@ -33,6 +36,10 @@ func main() {
 		}
 		return
 	}
-	fmt.Fprintln(os.Stderr, "kite-agent: run loop not implemented")
-	os.Exit(1)
+
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	log.Printf("kite-agent %q sending to %s every %s (%d collectors)", cfg.Name, cfg.HubURL, cfg.Interval, len(cols))
+	sender := agent.NewSender(cfg.HubURL, cfg.Token, 5*time.Second)
+	agent.Run(ctx, cfg, cols, sender.Send, log.Printf)
 }
