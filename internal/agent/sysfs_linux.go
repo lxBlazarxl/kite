@@ -263,3 +263,18 @@ func (c *raplCollector) Collect(_ context.Context, s *protocol.Sample) error {
 	s.Power = p
 	return nil
 }
+
+// nvidiaAsleep reports whether any NVIDIA PCI device is runtime-suspended,
+// in which case querying it would wake it up.
+func nvidiaAsleep(root string) bool {
+	devs, _ := filepath.Glob(filepath.Join(root, "sys/bus/pci/devices/*"))
+	for _, d := range devs {
+		if v, _ := readStr(filepath.Join(d, "vendor")); v != "0x10de" {
+			continue
+		}
+		if st, _ := readStr(filepath.Join(d, "power/runtime_status")); st == "suspended" {
+			return true
+		}
+	}
+	return false
+}

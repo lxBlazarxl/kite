@@ -70,7 +70,7 @@ func TestBatteryIntel(t *testing.T) {
 
 func TestPowerState(t *testing.T) {
 	cases := []struct {
-		root          string
+		root         string
 		hasBat, onAC bool
 	}{{amdRoot, true, false}, {intelRoot, true, true}, {emptyRoot, false, true}}
 	for _, c := range cases {

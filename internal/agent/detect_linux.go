@@ -15,5 +15,11 @@ func Detect(cfg Config) []Collector {
 	if c, ok := NewRAPL(cfg.Root); ok {
 		cols = append(cols, c)
 	}
+	if c, ok := NewAMDGPU(cfg.Root); ok {
+		cols = append(cols, c)
+	}
+	if c, ok := NewNvidia(cfg.Root); ok {
+		cols = append(cols, c)
+	}
 	return cols
 }
