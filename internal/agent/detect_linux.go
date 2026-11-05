@@ -21,5 +21,8 @@ func Detect(cfg Config) []Collector {
 	if c, ok := NewNvidia(cfg.Root); ok {
 		cols = append(cols, c)
 	}
+	if c, ok := NewDocker(cfg.DockerHost); ok {
+		cols = append(cols, c)
+	}
 	return cols
 }

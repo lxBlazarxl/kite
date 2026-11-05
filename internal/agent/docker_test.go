@@ -1,0 +1,143 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/retransmit/kite/internal/protocol"
+)
+
+const containersJSON = `[
+ {"Id":"aaa","Names":["/proxy"],"Image":"example/proxy","State":"running"},
+ {"Id":"bbb","Names":["/store"],"Image":"x","State":"running"},
+ {"Id":"ccc","Names":["/old"],"Image":"y","State":"exited"}]`
+
+func statsJSON(total, system uint64) string {
+	return fmt.Sprintf(`{"cpu_stats":{"cpu_usage":{"total_usage":%d},"system_cpu_usage":%d,"online_cpus":4},
+ "memory_stats":{"usage":500000000,"stats":{"inactive_file":100000000}}}`, total, system)
+}
+
+type fakeDocker struct {
+	mu       sync.Mutex
+	aaaCalls int
+	paths    []string
+}
+
+func (f *fakeDocker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paths = append(f.paths, r.URL.Path)
+	switch {
+	case r.URL.Path == "/containers/json":
+		fmt.Fprint(w, containersJSON)
+	case r.URL.Path == "/containers/aaa/stats":
+		if r.URL.Query().Get("one-shot") != "true" || r.URL.Query().Get("stream") != "false" {
+			http.Error(w, "want one-shot", 400)
+			return
+		}
+		f.aaaCalls++
+		if f.aaaCalls == 1 {
+			fmt.Fprint(w, statsJSON(1e9, 100e9))
+		} else {
+			fmt.Fprint(w, statsJSON(2e9, 110e9))
+		}
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func dockerSample(t *testing.T, c Collector) *protocol.Sample {
+	t.Helper()
+	s := &protocol.Sample{Time: time.Unix(100, 0)}
+	if err := c.Collect(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func byName(s *protocol.Sample, name string) protocol.Container {
+	for _, c := range s.Docker.Containers {
+		if c.Name == name {
+			return c
+		}
+	}
+	return protocol.Container{}
+}
+
+func TestDockerCPUAndMem(t *testing.T) {
+	fd := &fakeDocker{}
+	srv := httptest.NewServer(fd)
+	defer srv.Close()
+	c, ok := NewDocker("tcp://" + srv.Listener.Addr().String())
+	if !ok {
+		t.Fatal("tcp host must count as present")
+	}
+	s := dockerSample(t, c)
+	var names []string
+	for _, ct := range s.Docker.Containers {
+		names = append(names, ct.Name)
+	}
+	if strings.Join(names, ",") != "old,proxy,store" {
+		t.Fatalf("names %v", names)
+	}
+	if p := byName(s, "proxy"); p.CPUPct != nil || p.MemBytes == nil || *p.MemBytes != 400e6 || p.Image != "example/proxy" {
+		t.Fatalf("first proxy %+v", p)
+	}
+	s = dockerSample(t, c)
+	if p := byName(s, "proxy"); p.CPUPct == nil || *p.CPUPct != 40 {
+		t.Fatalf("second proxy cpu %v", p.CPUPct)
+	}
+	if o := byName(s, "old"); o.State != "exited" || o.CPUPct != nil || o.MemBytes != nil {
+		t.Fatalf("old %+v", o)
+	}
+	for _, p := range fd.paths {
+		if strings.Contains(p, "ccc") {
+			t.Fatal("stats requested for a stopped container")
+		}
+	}
+}
+
+func TestDockerContainerVanishes(t *testing.T) {
+	srv := httptest.NewServer(&fakeDocker{})
+	defer srv.Close()
+	c, _ := NewDocker("tcp://" + srv.Listener.Addr().String())
+	s := dockerSample(t, c)
+	if p := byName(s, "store"); p.State != "running" || p.CPUPct != nil || p.MemBytes != nil {
+		t.Fatalf("store %+v", p)
+	}
+}
+
+func TestDockerDaemonDown(t *testing.T) {
+	srv := httptest.NewServer(&fakeDocker{})
+	addr := srv.Listener.Addr().String()
+	srv.Close()
+	c, _ := NewDocker("tcp://" + addr)
+	s := &protocol.Sample{Time: time.Unix(1, 0)}
+	if err := c.Collect(context.Background(), s); err == nil || s.Docker != nil {
+		t.Fatalf("err %v docker %+v", err, s.Docker)
+	}
+}
+
+func TestDockerUnixSocketMissing(t *testing.T) {
+	if _, ok := NewDocker("unix://" + t.TempDir() + "/nope.sock"); ok {
+		t.Fatal("missing socket must not be detected")
+	}
+}
+
+func TestParseStatsReal(t *testing.T) {
+	b, err := os.ReadFile("testdata/docker/stats-real.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	total, system, cpus, mem, err := parseStats(b)
+	if err != nil || mem == 0 || cpus == 0 || total == 0 || system == 0 {
+		t.Fatalf("total %d system %d cpus %d mem %d err %v", total, system, cpus, mem, err)
+	}
+}
