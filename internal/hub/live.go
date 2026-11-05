@@ -98,6 +98,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no") // stop nginx from buffering the stream
 	w.WriteHeader(http.StatusOK)
 	fl.Flush()
 

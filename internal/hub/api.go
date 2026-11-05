@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -12,9 +13,13 @@ import (
 	"time"
 
 	"github.com/retransmit/kite/internal/protocol"
+	"github.com/retransmit/kite/internal/web"
 )
 
-const maxIngestBytes = 1 << 20
+const (
+	maxIngestBytes = 1 << 20
+	maxSeriesKeys  = 64
+)
 
 var bodyReadTimeout = 10 * time.Second
 
@@ -55,10 +60,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/machines/{name}/series", s.requireSession(s.handleSeries))
 	mux.HandleFunc("DELETE /api/v1/machines/{name}", s.requireSession(s.handleDelete))
 	mux.HandleFunc("GET /api/v1/stream", s.requireSession(s.handleStream))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Write([]byte("kite hub is running; web UI arrives in a later release\n"))
-	})
+	mux.HandleFunc("GET /api/v1/session", s.handleSession)
+	mux.Handle("GET /", web.Handler())
 	return mux
 }
 
@@ -184,6 +187,10 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "at least one key parameter is required")
 		return
 	}
+	if len(keys) > maxSeriesKeys {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("at most %d keys per request", maxSeriesKeys))
+		return
+	}
 	from, err1 := strconv.ParseInt(q.Get("from"), 10, 64)
 	to, err2 := strconv.ParseInt(q.Get("to"), 10, 64)
 	if err1 != nil || err2 != nil || from > to {
@@ -195,37 +202,71 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 	switch res {
 	case "":
 		res = ChooseResolution(fromT, toT, s.now(), s.cfg.RawRetention)
-	case ResRaw, Res1m:
+	case ResRaw, Res1m, Res10m:
 	default:
-		httpError(w, http.StatusBadRequest, "res must be raw or 1m")
+		httpError(w, http.StatusBadRequest, "res must be raw, 1m or 10m")
 		return
 	}
 	name := r.PathValue("name")
-	data, err := s.st.Query(r.Context(), name, keys, fromT, toT, res)
+	interval, err := s.st.machineInterval(r.Context(), name)
 	if err != nil {
 		s.storeError(w, err)
 		return
 	}
-	step := 60.0
-	if res == ResRaw {
-		if step, err = s.st.machineInterval(r.Context(), name); err != nil {
-			s.storeError(w, err)
-			return
+
+	// Stream one key at a time so a week of many series is never held in
+	// memory at once.
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"resolution":%q,"step":%s,"series":{`, res, strconv.FormatFloat(stepFor(res, interval), 'f', -1, 64))
+	first := true
+	buf := make([]byte, 0, 64)
+	err = s.st.QueryEach(r.Context(), name, keys, fromT, toT, res, func(k string, pts []SeriesPoint) error {
+		kb, _ := json.Marshal(k)
+		if !first {
+			w.Write([]byte{','})
 		}
-	}
-	series := make(map[string][][]float64, len(data))
-	for k, pts := range data {
-		rows := make([][]float64, 0, len(pts))
-		for _, p := range pts {
-			if res == ResRaw {
-				rows = append(rows, []float64{float64(p.TS), p.Avg})
-			} else {
-				rows = append(rows, []float64{float64(p.TS), p.Avg, p.Max})
+		first = false
+		w.Write(kb)
+		w.Write([]byte(":["))
+		for i, p := range pts {
+			buf = buf[:0]
+			if i > 0 {
+				buf = append(buf, ',')
+			}
+			buf = append(buf, '[')
+			buf = strconv.AppendInt(buf, p.TS, 10)
+			buf = append(buf, ',')
+			buf = strconv.AppendFloat(buf, p.Avg, 'f', -1, 64)
+			if res != ResRaw {
+				buf = append(buf, ',')
+				buf = strconv.AppendFloat(buf, p.Max, 'f', -1, 64)
+			}
+			buf = append(buf, ']')
+			if _, err := w.Write(buf); err != nil {
+				return err
 			}
 		}
-		series[k] = rows
+		_, err := w.Write([]byte{']'})
+		return err
+	})
+	if err != nil {
+		// Headers are already sent; the truncated body tells the client.
+		log.Printf("series %s: %v", name, err)
+		return
 	}
-	writeJSON(w, map[string]any{"resolution": res, "step": step, "series": series})
+	w.Write([]byte("}}"))
+}
+
+// stepFor is the expected spacing of points at a resolution.
+func stepFor(res Resolution, machineInterval float64) float64 {
+	switch res {
+	case Res1m:
+		return 60
+	case Res10m:
+		return 600
+	default:
+		return machineInterval
+	}
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {

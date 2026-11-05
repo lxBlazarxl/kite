@@ -116,3 +116,28 @@ func TestNoPasswordOpen(t *testing.T) {
 		t.Fatalf("login without password configured: %d", r.StatusCode)
 	}
 }
+
+func sessionInfo(t *testing.T, h *testHub, cookies ...*http.Cookie) (bool, bool) {
+	t.Helper()
+	var v struct {
+		PasswordRequired bool `json:"password_required"`
+		LoggedIn         bool `json:"logged_in"`
+	}
+	decode(t, h.do("GET", "/api/v1/session", "", nil, cookies...), &v)
+	return v.PasswordRequired, v.LoggedIn
+}
+
+func TestSessionInfo(t *testing.T) {
+	open := newTestHub(t, nil)
+	if req, in := sessionInfo(t, open); req || !in {
+		t.Fatalf("no password: %v %v", req, in)
+	}
+	h := newTestHub(t, withPassword)
+	if req, in := sessionInfo(t, h); !req || in {
+		t.Fatalf("password, no cookie: %v %v", req, in)
+	}
+	c := cookieFrom(t, login(t, h, "pw"))
+	if req, in := sessionInfo(t, h, c); !req || !in {
+		t.Fatalf("logged in: %v %v", req, in)
+	}
+}

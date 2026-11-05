@@ -190,6 +190,7 @@ type Resolution string
 const (
 	ResRaw Resolution = "raw"
 	Res1m  Resolution = "1m"
+	Res10m Resolution = "10m" // 1-minute rollups regrouped into 10-minute buckets at query time
 )
 
 // SeriesPoint is one point of a series. For raw data Avg and Max are equal.
@@ -202,36 +203,60 @@ type SeriesPoint struct {
 // Query returns points for each key between from and to (inclusive),
 // oldest first. Keys with no data map to an empty slice.
 func (s *Store) Query(ctx context.Context, machine string, keys []string, from, to time.Time, res Resolution) (map[string][]SeriesPoint, error) {
-	mid, err := s.machineID(ctx, machine)
+	out := make(map[string][]SeriesPoint, len(keys))
+	err := s.QueryEach(ctx, machine, keys, from, to, res, func(k string, pts []SeriesPoint) error {
+		out[k] = pts
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	q := `SELECT r.ts, r.v, r.v FROM raw r JOIN series s ON s.id=r.series_id WHERE s.machine_id=? AND s.key=? AND r.ts BETWEEN ? AND ? ORDER BY r.ts`
-	if res == Res1m {
-		q = `SELECT r.ts, r.avg, r.max FROM rollup_1m r JOIN series s ON s.id=r.series_id WHERE s.machine_id=? AND s.key=? AND r.ts BETWEEN ? AND ? ORDER BY r.ts`
+	return out, nil
+}
+
+var seriesQueries = map[Resolution]string{
+	ResRaw: `SELECT r.ts, r.v, r.v FROM raw r JOIN series s ON s.id=r.series_id
+		WHERE s.machine_id=? AND s.key=? AND r.ts BETWEEN ? AND ? ORDER BY r.ts`,
+	Res1m: `SELECT r.ts, r.avg, r.max FROM rollup_1m r JOIN series s ON s.id=r.series_id
+		WHERE s.machine_id=? AND s.key=? AND r.ts BETWEEN ? AND ? ORDER BY r.ts`,
+	Res10m: `SELECT r.ts/600*600 AS b, avg(r.avg), max(r.max) FROM rollup_1m r JOIN series s ON s.id=r.series_id
+		WHERE s.machine_id=? AND s.key=? AND r.ts BETWEEN ? AND ? GROUP BY b ORDER BY b`,
+}
+
+// QueryEach is Query delivered one key at a time, in the order given, so a
+// caller can stream the result instead of holding every series in memory.
+func (s *Store) QueryEach(ctx context.Context, machine string, keys []string, from, to time.Time, res Resolution, fn func(key string, pts []SeriesPoint) error) error {
+	q, ok := seriesQueries[res]
+	if !ok {
+		return fmt.Errorf("unknown resolution %q", res)
 	}
-	out := make(map[string][]SeriesPoint, len(keys))
+	mid, err := s.machineID(ctx, machine)
+	if err != nil {
+		return err
+	}
 	for _, k := range keys {
 		rows, err := s.db.QueryContext(ctx, q, mid, k, from.Unix(), to.Unix())
 		if err != nil {
-			return nil, err
+			return err
 		}
 		pts := []SeriesPoint{}
 		for rows.Next() {
 			var p SeriesPoint
 			if err := rows.Scan(&p.TS, &p.Avg, &p.Max); err != nil {
 				rows.Close()
-				return nil, err
+				return err
 			}
 			pts = append(pts, p)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
-			return nil, err
+			return err
 		}
-		out[k] = pts
+		if err := fn(k, pts); err != nil {
+			return err
+		}
 	}
-	return out, nil
+	return nil
 }
 
 // DeleteMachine removes a machine and all of its history. It reports

@@ -21,6 +21,8 @@ type Sample struct {
 	Hostname    string            `json:"hostname"`
 	Time        time.Time         `json:"time"`
 	IntervalSec float64           `json:"interval_sec"`
+	UptimeSec   uint64            `json:"uptime_sec,omitempty"`
+	Platform    string            `json:"platform,omitempty"` // distro or Windows edition, e.g. "arch"
 	CPU         *CPU              `json:"cpu,omitempty"`
 	Memory      *Memory           `json:"memory,omitempty"`
 	GPUs        []GPU             `json:"gpus,omitempty"`

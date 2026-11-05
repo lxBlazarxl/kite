@@ -109,3 +109,39 @@ func TestChooseResolution(t *testing.T) {
 		}
 	}
 }
+
+func TestChooseResolutionTiers(t *testing.T) {
+	day := 24 * time.Hour
+	cases := []struct {
+		from, to time.Time
+		want     Resolution
+	}{
+		{t0.Add(-time.Hour), t0, ResRaw},
+		{t0.Add(-3 * time.Hour), t0, ResRaw},
+		{t0.Add(-6 * time.Hour), t0, Res1m},
+		{t0.Add(-36 * time.Hour), t0, Res1m},
+		{t0.Add(-37 * time.Hour), t0, Res10m},
+		{t0.Add(-7 * day), t0, Res10m},
+		{t0.Add(-30 * time.Hour), t0.Add(-29 * time.Hour), Res1m},
+	}
+	for _, c := range cases {
+		if got := ChooseResolution(c.from, c.to, t0, day); got != c.want {
+			t.Errorf("%v: got %s want %s", c.to.Sub(c.from), got, c.want)
+		}
+	}
+}
+
+func TestQuery10m(t *testing.T) {
+	st, _ := openTest(t)
+	for ts := int64(600); ts < 1200; ts += 60 {
+		ingest(t, st, sample("pc", "linux", 1), at(ts))
+	}
+	ingest(t, st, sample("pc", "linux", 5), at(1200))
+	if err := st.Rollup(bg, at(1300)); err != nil {
+		t.Fatal(err)
+	}
+	want := []SeriesPoint{{600, 1, 1}, {1200, 5, 5}}
+	if got := query(t, st, Res10m, at(0), at(2000)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
