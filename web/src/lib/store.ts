@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { api } from './api'
+import { api, HttpError } from './api'
 import { streamErrorAction } from './overview'
 import { go } from './router'
 import type { MachineInfo, SampleFrame, SessionInfo, StatusFrame } from './types'
@@ -10,7 +10,21 @@ export const store = reactive({
   /** Hub time (unix seconds) of the newest sample seen. */
   lastUpdate: 0,
   session: null as SessionInfo | null,
+  /** Bumped each time the stream reopens after a drop, so views can refetch what they missed. */
+  reconnects: 0,
 })
+
+const STALE_MS = 20_000 // status frames arrive every 5 s, so 20 s of silence means a dead connection
+
+/** True when messages have been arriving but none for longer than limitMs (a half-open connection after sleep). */
+export function isStale(lastMessageAt: number, nowMs: number, limitMs = STALE_MS): boolean {
+  return lastMessageAt > 0 && nowMs - lastMessageAt > limitMs
+}
+
+/** Startup errors other than "login required" are worth retrying (hub restarting, proxy hiccup). */
+export function shouldRetryConnect(err: unknown): boolean {
+  return !(err instanceof HttpError && err.status === 401)
+}
 
 export function applySample(f: SampleFrame) {
   const m = store.machines[f.machine]
@@ -71,19 +85,30 @@ export function startStream(): () => void {
   let es: EventSource | null = null
   let stopped = false
   let retry: ReturnType<typeof setTimeout> | undefined
+  let opened = false
+  let lastMessageAt = 0
 
   const open = () => {
+    es?.close()
+    lastMessageAt = 0
     es = new EventSource('api/v1/stream')
     es.addEventListener('open', () => {
       store.connected = true
+      lastMessageAt = Date.now()
+      if (opened) store.reconnects++
+      opened = true
       loadMachines().catch(() => {}) // resync anything missed while disconnected
     })
     es.addEventListener('sample', (e) => {
+      lastMessageAt = Date.now()
       const f: SampleFrame = JSON.parse((e as MessageEvent).data)
       applySample(f)
       listeners.forEach((fn) => fn(f))
     })
-    es.addEventListener('status', (e) => applyStatus(JSON.parse((e as MessageEvent).data)))
+    es.addEventListener('status', (e) => {
+      lastMessageAt = Date.now()
+      applyStatus(JSON.parse((e as MessageEvent).data))
+    })
     es.addEventListener('error', async () => {
       store.connected = false
       try {
@@ -103,10 +128,26 @@ export function startStream(): () => void {
       }
     })
   }
+  // After sleep or a network change the socket can stay half-open without any
+  // error event; reopen it when nothing has arrived for a while.
+  const checkStale = () => {
+    if (!stopped && isStale(lastMessageAt, Date.now())) {
+      store.connected = false
+      open()
+    }
+  }
+  const watchdog = setInterval(checkStale, 15_000)
+  const onVisible = () => {
+    if (!document.hidden) checkStale()
+  }
+  document.addEventListener('visibilitychange', onVisible)
+
   open()
   return () => {
     stopped = true
     clearTimeout(retry)
+    clearInterval(watchdog)
+    document.removeEventListener('visibilitychange', onVisible)
     es?.close()
   }
 }

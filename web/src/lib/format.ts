@@ -72,3 +72,9 @@ export function yMax(unit: Unit, max: number): number {
   const floor = unit === 'bytes' || unit === 'bps' ? 1024 : 1
   return Math.max(max * 1.1, floor)
 }
+
+/** Y axis range: percentages are fixed; others start at 0 unless data goes negative (battery discharge). */
+export function yRange(unit: Unit, min: number, max: number): [number, number] {
+  if (unit === 'pct') return [0, 100]
+  return [min < 0 ? min * 1.1 : 0, yMax(unit, max)]
+}

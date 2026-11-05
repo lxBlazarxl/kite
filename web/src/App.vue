@@ -7,7 +7,7 @@ import { api } from './lib/api'
 import { nowSec } from './lib/clock'
 import { formatAgo } from './lib/format'
 import { useRoute } from './lib/router'
-import { loadMachines, startStream, store } from './lib/store'
+import { loadMachines, shouldRetryConnect, startStream, store } from './lib/store'
 
 type Theme = 'dark' | 'light'
 
@@ -36,20 +36,28 @@ function toggleTheme() {
 
 const route = useRoute()
 let stopStream: (() => void) | null = null
+let retryTimer: ReturnType<typeof setTimeout> | undefined
 
 async function connect() {
   stopStream?.()
+  stopStream = null
+  clearTimeout(retryTimer)
   try {
     store.session = await api.session()
     await loadMachines()
-  } catch {
-    return // a 401 already redirected to login
+  } catch (e) {
+    // A 401 already went to the login screen; anything else (hub restarting) is retried.
+    if (shouldRetryConnect(e)) retryTimer = setTimeout(connect, 5000)
+    return
   }
   stopStream = startStream()
 }
 
 onMounted(connect)
-onUnmounted(() => stopStream?.())
+onUnmounted(() => {
+  clearTimeout(retryTimer)
+  stopStream?.()
+})
 
 async function logout() {
   await api.logout()

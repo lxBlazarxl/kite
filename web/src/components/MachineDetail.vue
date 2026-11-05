@@ -82,6 +82,14 @@ async function load() {
 }
 
 watch(() => [props.name, props.range], load, { immediate: true })
+// After the stream reconnects (sleep, network change) refetch the live window so
+// the missed minutes are filled in instead of showing as a false gap.
+watch(
+  () => store.reconnects,
+  () => {
+    if (props.range === 'live') load()
+  },
+)
 onBeforeUnmount(() => {
   generation++
   unsubscribe?.()

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAgo, formatBytes, formatPct, formatRate, formatUnit, formatUptime, formatWatts, platformLabel, yMax } from './format'
+import { formatAgo, formatBytes, formatPct, formatRate, formatUnit, formatUptime, formatWatts, platformLabel, yMax, yRange } from './format'
 import type { Sample } from './types'
 
 describe('format', () => {
@@ -54,5 +54,20 @@ describe('yMax', () => {
     expect(yMax('bps', 2e6)).toBeCloseTo(2.2e6)
     expect(yMax('watts', 0)).toBe(1)
     expect(yMax('pct', 12)).toBe(100)
+  })
+})
+
+describe('yRange', () => {
+  it('includes negative values such as battery discharge', () => {
+    const [lo, hi] = yRange('watts', -8.2, 0)
+    expect(lo).toBeCloseTo(-9.02)
+    expect(hi).toBe(1)
+    const [lo2, hi2] = yRange('watts', -8, 20)
+    expect(lo2).toBeCloseTo(-8.8)
+    expect(hi2).toBeCloseTo(22)
+  })
+  it('starts at zero for non-negative data', () => {
+    expect(yRange('bps', 0, 0)).toEqual([0, 1024])
+    expect(yRange('pct', 3, 40)).toEqual([0, 100])
   })
 })

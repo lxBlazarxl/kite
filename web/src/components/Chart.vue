@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { formatUnit, yMax } from '../lib/format'
+import { formatUnit, yRange } from '../lib/format'
 import { alignSeries, type ChartSpec } from '../lib/series'
 
 const props = defineProps<{
@@ -59,7 +59,7 @@ function build() {
     cursor: { drag: { x: true, y: false } },
     scales: {
       x: { time: true },
-      y: { range: (_u, _min, max) => [0, yMax(props.spec.unit, max ?? 0)] },
+      y: { range: (_u, min, max) => yRange(props.spec.unit, min ?? 0, max ?? 0) },
     },
     axes: [
       { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } },
