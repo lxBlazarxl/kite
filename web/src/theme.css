@@ -1,0 +1,45 @@
+:root,
+:root[data-theme='dark'] {
+  --bg: #0f1216;
+  --panel: #161b22;
+  --line: #21262d;
+  --line-strong: #30363d;
+  --text: #e6e8eb;
+  --muted: #8b939c;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --crit: #f85149;
+  --cpu: #58a6ff;
+  --ram: #bc8cff;
+  --gpu: #3fb950;
+  --c4: #f0883e;
+  --c5: #56d4dd;
+  --c6: #e3b341;
+  color-scheme: dark;
+}
+:root[data-theme='light'] {
+  --bg: #f6f8fa;
+  --panel: #ffffff;
+  --line: #d8dee4;
+  --line-strong: #c4cbd3;
+  --text: #1f2328;
+  --muted: #59636e;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --crit: #cf222e;
+  --cpu: #0969da;
+  --ram: #8250df;
+  --gpu: #1a7f37;
+  --c4: #bc4c00;
+  --c5: #1b7c83;
+  --c6: #7d4e00;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+a { color: inherit; }
+.muted { color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; }
+button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
