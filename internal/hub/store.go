@@ -288,3 +288,12 @@ func (s *Store) Secret(ctx context.Context) ([]byte, error) {
 	}
 	return v, s.setMeta(ctx, "session_secret", v)
 }
+
+func (s *Store) machineInterval(ctx context.Context, name string) (float64, error) {
+	var v float64
+	err := s.db.QueryRowContext(ctx, `SELECT interval_sec FROM machines WHERE name=?`, name).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrUnknownMachine
+	}
+	return v, err
+}

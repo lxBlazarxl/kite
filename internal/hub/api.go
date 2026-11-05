@@ -1,0 +1,220 @@
+package hub
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"errors"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/retransmit/kite/internal/protocol"
+)
+
+const maxIngestBytes = 1 << 20
+
+// Server serves the hub HTTP API.
+type Server struct {
+	st  *Store
+	cfg Config
+	now func() time.Time
+}
+
+// NewServer builds a server. now is the clock used for receive times and
+// online checks.
+func NewServer(st *Store, cfg Config, now func() time.Time) *Server {
+	return &Server{st: st, cfg: cfg, now: now}
+}
+
+// Handler returns the HTTP routes.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/ingest", s.handleIngest)
+	mux.HandleFunc("GET /api/v1/machines", s.handleMachines)
+	mux.HandleFunc("GET /api/v1/machines/{name}/keys", s.handleKeys)
+	mux.HandleFunc("GET /api/v1/machines/{name}/series", s.handleSeries)
+	mux.HandleFunc("DELETE /api/v1/machines/{name}", s.handleDelete)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte("kite hub is running; web UI arrives in a later release\n"))
+	})
+	return mux
+}
+
+// RunMaintenance rolls up every minute and prunes every 10 minutes until ctx ends.
+func (s *Server) RunMaintenance(ctx context.Context) {
+	rollup := time.NewTicker(time.Minute)
+	prune := time.NewTicker(10 * time.Minute)
+	defer rollup.Stop()
+	defer prune.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-rollup.C:
+			if err := s.st.Rollup(ctx, s.now()); err != nil {
+				log.Printf("rollup: %v", err)
+			}
+		case <-prune.C:
+			if err := s.st.Prune(ctx, s.now(), s.cfg.RawRetention, s.cfg.RollupRetention); err != nil {
+				log.Printf("prune: %v", err)
+			}
+		}
+	}
+}
+
+// isOnline reports whether a machine has reported within 3 intervals.
+func isOnline(lastSeen, now time.Time, intervalSec float64) bool {
+	return now.Sub(lastSeen) <= time.Duration(3*intervalSec*float64(time.Second))
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func httpError(w http.ResponseWriter, code int, msg string) {
+	http.Error(w, msg, code)
+}
+
+func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
+	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || subtle.ConstantTimeCompare([]byte(tok), []byte(s.cfg.AgentToken)) != 1 {
+		httpError(w, http.StatusUnauthorized, "bad agent token")
+		return
+	}
+	var smp protocol.Sample
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxIngestBytes)).Decode(&smp); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			httpError(w, http.StatusRequestEntityTooLarge, "sample too large")
+			return
+		}
+		httpError(w, http.StatusBadRequest, "bad sample: "+err.Error())
+		return
+	}
+	if !protocol.ValidMachineName(smp.Machine) {
+		httpError(w, http.StatusBadRequest, "invalid machine name")
+		return
+	}
+	if smp.IntervalSec <= 0 {
+		smp.IntervalSec = 5 // agents always send it; guard against a hub that never sees a machine as online
+	}
+	if err := s.st.Ingest(r.Context(), &smp, s.now()); err != nil {
+		log.Printf("ingest %s: %v", smp.Machine, err)
+		httpError(w, http.StatusInternalServerError, "store failed")
+		return
+	}
+	s.afterIngest(&smp)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// afterIngest is a hook for live updates (set up in live.go).
+func (s *Server) afterIngest(*protocol.Sample) {}
+
+type machineOut struct {
+	Name        string          `json:"name"`
+	OS          string          `json:"os"`
+	Online      bool            `json:"online"`
+	LastSeen    int64           `json:"last_seen"`
+	IntervalSec float64         `json:"interval_sec"`
+	Latest      json.RawMessage `json:"latest"`
+}
+
+func (s *Server) handleMachines(w http.ResponseWriter, r *http.Request) {
+	ms, err := s.st.Machines(r.Context())
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	now := s.now()
+	out := make([]machineOut, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, machineOut{m.Name, m.OS, isOnline(m.LastSeen, now, m.IntervalSec), m.LastSeen.Unix(), m.IntervalSec, m.Latest})
+	}
+	writeJSON(w, out)
+}
+
+func (s *Server) storeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrUnknownMachine) {
+		httpError(w, http.StatusNotFound, "unknown machine")
+		return
+	}
+	httpError(w, http.StatusInternalServerError, err.Error())
+}
+
+func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
+	keys, err := s.st.Keys(r.Context(), r.PathValue("name"))
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	writeJSON(w, keys)
+}
+
+func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	keys := q["key"]
+	if len(keys) == 0 {
+		httpError(w, http.StatusBadRequest, "at least one key parameter is required")
+		return
+	}
+	from, err1 := strconv.ParseInt(q.Get("from"), 10, 64)
+	to, err2 := strconv.ParseInt(q.Get("to"), 10, 64)
+	if err1 != nil || err2 != nil || from > to {
+		httpError(w, http.StatusBadRequest, "from and to must be unix seconds with from <= to")
+		return
+	}
+	fromT, toT := time.Unix(from, 0), time.Unix(to, 0)
+	res := Resolution(q.Get("res"))
+	switch res {
+	case "":
+		res = ChooseResolution(fromT, toT, s.now(), s.cfg.RawRetention)
+	case ResRaw, Res1m:
+	default:
+		httpError(w, http.StatusBadRequest, "res must be raw or 1m")
+		return
+	}
+	name := r.PathValue("name")
+	data, err := s.st.Query(r.Context(), name, keys, fromT, toT, res)
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	step := 60.0
+	if res == ResRaw {
+		if step, err = s.st.machineInterval(r.Context(), name); err != nil {
+			s.storeError(w, err)
+			return
+		}
+	}
+	series := make(map[string][][]float64, len(data))
+	for k, pts := range data {
+		rows := make([][]float64, 0, len(pts))
+		for _, p := range pts {
+			if res == ResRaw {
+				rows = append(rows, []float64{float64(p.TS), p.Avg})
+			} else {
+				rows = append(rows, []float64{float64(p.TS), p.Avg, p.Max})
+			}
+		}
+		series[k] = rows
+	}
+	writeJSON(w, map[string]any{"resolution": res, "step": step, "series": series})
+}
+
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	ok, err := s.st.DeleteMachine(r.Context(), r.PathValue("name"))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		httpError(w, http.StatusNotFound, "unknown machine")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
