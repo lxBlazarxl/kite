@@ -3,6 +3,7 @@ package hub
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -61,7 +62,8 @@ func TestStreamReceivesSample(t *testing.T) {
 			continue
 		}
 		if sawEvent && strings.HasPrefix(line, "data:") {
-			if !strings.Contains(line, `"machine":"pc"`) || !strings.Contains(line, `"online":true`) {
+			if !strings.Contains(line, `"machine":"pc"`) || !strings.Contains(line, `"online":true`) ||
+				!strings.Contains(line, fmt.Sprintf(`"ts":%d`, t0.Unix())) {
 				t.Fatalf("data %s", line)
 			}
 			return

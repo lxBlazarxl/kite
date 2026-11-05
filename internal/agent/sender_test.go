@@ -125,3 +125,22 @@ func TestRunLogsStreaks(t *testing.T) {
 		t.Fatalf("logs %q", logs)
 	}
 }
+
+func TestRunHungCollectorStillSends(t *testing.T) {
+	sent := make(chan error, 4)
+	send := func(ctx context.Context, _ *protocol.Sample) error {
+		sent <- ctx.Err()
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go Run(ctx, Config{Name: "pc", Interval: 200 * time.Millisecond}, []Collector{ctxCollector{"docker"}}, send, func(string, ...any) {})
+	select {
+	case err := <-sent:
+		if err != nil {
+			t.Fatalf("send got an already-expired context: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no sample sent while a collector hangs")
+	}
+}

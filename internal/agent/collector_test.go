@@ -55,3 +55,26 @@ func TestCPUAndMemoryReal(t *testing.T) {
 		t.Fatalf("memory: %+v", s.Memory)
 	}
 }
+
+func TestCollectOnceBoundsHungCollector(t *testing.T) {
+	cfg := Config{Name: "pc", Interval: 400 * time.Millisecond}
+	hung := fakeCollector{"docker", func(*protocol.Sample) error { return nil }}
+	cols := []Collector{ctxCollector{"docker"}, hung}
+	start := time.Now()
+	s := CollectOnce(context.Background(), cfg, cols, start)
+	if el := time.Since(start); el > 300*time.Millisecond {
+		t.Fatalf("hung collector held the sample for %v", el)
+	}
+	if s.Unavailable["docker"] == "" {
+		t.Fatal("timeout not recorded in unavailable")
+	}
+}
+
+// ctxCollector blocks until its context is done, like a hung Docker daemon.
+type ctxCollector struct{ name string }
+
+func (c ctxCollector) Name() string { return c.name }
+func (c ctxCollector) Collect(ctx context.Context, _ *protocol.Sample) error {
+	<-ctx.Done()
+	return ctx.Err()
+}

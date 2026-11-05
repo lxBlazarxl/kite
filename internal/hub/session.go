@@ -72,6 +72,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	http.NewResponseController(w).SetReadDeadline(time.Now().Add(bodyReadTimeout))
 	var body struct {
 		Password string `json:"password"`
 	}

@@ -66,7 +66,7 @@ func (c *diskCollector) Collect(ctx context.Context, s *protocol.Sample) error {
 			continue
 		}
 		d := protocol.Disk{Mount: p.Mountpoint, Device: p.Device, FSType: p.Fstype, TotalBytes: u.Total, UsedBytes: u.Used}
-		dev := filepath.Base(p.Device)
+		dev := ioDeviceName(p.Device)
 		if st, ok := io[dev]; ok {
 			if v, ok := c.rates.Rate("disk."+dev+".r", st.ReadBytes, s.Time); ok {
 				d.ReadBps = &v
@@ -78,4 +78,13 @@ func (c *diskCollector) Collect(ctx context.Context, s *protocol.Sample) error {
 		s.Disks = append(s.Disks, d)
 	}
 	return nil
+}
+
+// ioDeviceName maps a mounted device to its /proc/diskstats name, following
+// symlinks such as /dev/mapper/vg-root -> /dev/dm-0 (LVM, LUKS).
+func ioDeviceName(device string) string {
+	if real, err := filepath.EvalSymlinks(device); err == nil {
+		device = real
+	}
+	return filepath.Base(device)
 }

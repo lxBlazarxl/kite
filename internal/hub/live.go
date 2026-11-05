@@ -63,8 +63,11 @@ func sseFrame(event string, v any) []byte {
 	return []byte("event: " + event + "\ndata: " + string(data) + "\n\n")
 }
 
-func (s *Server) afterIngest(smp *protocol.Sample) {
-	s.broker.Publish(sseFrame("sample", map[string]any{"machine": smp.Machine, "online": true, "sample": smp}))
+// afterIngest publishes a live sample. ts is the hub's receive time, the
+// same clock history uses, so live and historical points line up even when
+// the agent's clock is wrong.
+func (s *Server) afterIngest(smp *protocol.Sample, receivedAt time.Time) {
+	s.broker.Publish(sseFrame("sample", map[string]any{"machine": smp.Machine, "online": true, "ts": receivedAt.Unix(), "sample": smp}))
 }
 
 type statusOut struct {

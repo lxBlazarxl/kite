@@ -183,3 +183,24 @@ func TestReopenPersists(t *testing.T) {
 		t.Fatal("secret changed across reopen")
 	}
 }
+
+func TestIngestAfterExternalDelete(t *testing.T) {
+	st, path := openTest(t)
+	ingest(t, st, sample("pc", "linux", 10), t0)
+	cli, err := OpenStore(path) // like `kite-hub remove-machine` while the hub runs
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := cli.DeleteMachine(bg, "pc"); !ok || err != nil {
+		t.Fatalf("delete %v %v", ok, err)
+	}
+	cli.Close()
+	ingest(t, st, sample("pc", "linux", 20), t0.Add(5*time.Second))
+	keys, err := st.Keys(bg, "pc")
+	if err != nil || len(keys) == 0 {
+		t.Fatalf("keys after external delete: %v %v", keys, err)
+	}
+	if got := query(t, st, ResRaw, t0, t0.Add(time.Minute)); len(got) != 1 || got[0].Avg != 20 {
+		t.Fatalf("points after external delete: %v", got)
+	}
+}

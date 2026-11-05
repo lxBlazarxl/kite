@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -230,5 +231,34 @@ func TestIngestZeroIntervalDefaults(t *testing.T) {
 	decode(t, h.do("GET", "/api/v1/machines", "", nil), &ms)
 	if ms[0].IntervalSec != 5 || !ms[0].Online {
 		t.Fatalf("got %+v", ms[0])
+	}
+}
+
+func TestSlowBodyIsCutOff(t *testing.T) {
+	old := bodyReadTimeout
+	bodyReadTimeout = 150 * time.Millisecond
+	defer func() { bodyReadTimeout = old }()
+	h := newTestHub(t, nil)
+	conn, err := net.Dial("tcp", h.ts.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "POST /api/v1/ingest HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer tok\r\nContent-Length: 1000\r\n\r\n{\"machine\":")
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 64)
+	n, err := conn.Read(buf)
+	if err != nil || !strings.HasPrefix(string(buf[:n]), "HTTP/1.1 400") {
+		t.Fatalf("slow body not cut off: %q %v", buf[:n], err)
+	}
+}
+
+func TestHTTPServerTimeouts(t *testing.T) {
+	s := NewHTTPServer(":0", http.NotFoundHandler())
+	if s.IdleTimeout == 0 || s.ReadHeaderTimeout == 0 {
+		t.Fatalf("timeouts missing: %+v", s)
+	}
+	if s.ReadTimeout != 0 || s.WriteTimeout != 0 {
+		t.Fatal("server-wide read/write timeouts would kill SSE streams")
 	}
 }

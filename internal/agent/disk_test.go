@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -42,4 +44,19 @@ func TestDiskReal(t *testing.T) {
 		}
 	}
 	t.Fatalf("no / disk in %+v (unavailable %v)", s.Disks, s.Unavailable)
+}
+
+func TestIODeviceNameFollowsMapper(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "dm-0"), nil, 0o644)
+	os.MkdirAll(filepath.Join(dir, "mapper"), 0o755)
+	if err := os.Symlink("../dm-0", filepath.Join(dir, "mapper", "vg-root")); err != nil {
+		t.Fatal(err)
+	}
+	if got := ioDeviceName(filepath.Join(dir, "mapper", "vg-root")); got != "dm-0" {
+		t.Fatalf("got %q want dm-0", got)
+	}
+	if got := ioDeviceName("/dev/does-not-exist-sda1"); got != "does-not-exist-sda1" {
+		t.Fatalf("plain device: got %q", got)
+	}
 }

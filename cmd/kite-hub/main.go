@@ -37,7 +37,7 @@ func main() {
 	srv := hub.NewServer(st, cfg, time.Now)
 	go srv.RunMaintenance(ctx)
 
-	httpSrv := &http.Server{Addr: cfg.Listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	httpSrv := hub.NewHTTPServer(cfg.Listen, srv.Handler())
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)

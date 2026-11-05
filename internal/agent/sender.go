@@ -64,9 +64,9 @@ func Run(ctx context.Context, cfg Config, cols []Collector, send func(context.Co
 	defer ticker.Stop()
 	failing := false
 	tick := func() {
-		tctx, cancel := context.WithTimeout(ctx, cfg.Interval)
-		defer cancel()
-		err := send(tctx, CollectOnce(tctx, cfg, cols, time.Now()))
+		// CollectOnce bounds each collector; the send gets its own budget
+		// (the Sender's timeout) so a slow collector cannot starve it.
+		err := send(ctx, CollectOnce(ctx, cfg, cols, time.Now()))
 		switch {
 		case err != nil && !failing:
 			failing = true
@@ -81,6 +81,9 @@ func Run(ctx context.Context, cfg Config, cols []Collector, send func(context.Co
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			tick()
 		}
 	}

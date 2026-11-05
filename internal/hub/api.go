@@ -16,6 +16,15 @@ import (
 
 const maxIngestBytes = 1 << 20
 
+var bodyReadTimeout = 10 * time.Second
+
+// NewHTTPServer wraps a handler in an http.Server.
+func NewHTTPServer(addr string, h http.Handler) *http.Server {
+	// No server-wide ReadTimeout/WriteTimeout: they would cut SSE streams.
+	// Request bodies get a per-handler deadline instead (bodyReadTimeout).
+	return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
+}
+
 // Server serves the hub HTTP API.
 type Server struct {
 	st     *Store
@@ -100,6 +109,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusUnauthorized, "bad agent token")
 		return
 	}
+	http.NewResponseController(w).SetReadDeadline(time.Now().Add(bodyReadTimeout))
 	var smp protocol.Sample
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxIngestBytes)).Decode(&smp); err != nil {
 		var tooBig *http.MaxBytesError
@@ -117,12 +127,13 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if smp.IntervalSec <= 0 {
 		smp.IntervalSec = 5 // agents always send it; guard against a hub that never sees a machine as online
 	}
-	if err := s.st.Ingest(r.Context(), &smp, s.now()); err != nil {
+	receivedAt := s.now()
+	if err := s.st.Ingest(r.Context(), &smp, receivedAt); err != nil {
 		log.Printf("ingest %s: %v", smp.Machine, err)
 		httpError(w, http.StatusInternalServerError, "store failed")
 		return
 	}
-	s.afterIngest(&smp)
+	s.afterIngest(&smp, receivedAt)
 	w.WriteHeader(http.StatusNoContent)
 }
 

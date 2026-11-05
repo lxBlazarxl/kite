@@ -100,11 +100,11 @@ func TestRAPL(t *testing.T) {
 }
 
 func TestRAPLWrap(t *testing.T) {
-	if d := raplDelta(65532610000, 1000, 65532610987); d != 1987 {
-		t.Fatalf("wrap delta %d", d)
+	if d, ok := raplDelta(65532610000, 1000, 65532610987); !ok || d != 1987 {
+		t.Fatalf("wrap delta %d %v", d, ok)
 	}
-	if d := raplDelta(5, 10, 100); d != 5 {
-		t.Fatalf("plain delta %d", d)
+	if d, ok := raplDelta(5, 10, 100); !ok || d != 5 {
+		t.Fatalf("plain delta %d %v", d, ok)
 	}
 }
 
@@ -135,5 +135,50 @@ func TestLinuxEmptyRoot(t *testing.T) {
 	}
 	if _, ok := NewRAPL(emptyRoot); ok {
 		t.Error("rapl detected on empty root")
+	}
+}
+
+func TestPeripheralBatteryIgnored(t *testing.T) {
+	root := "testdata/sysfs/desktop-mouse"
+	if hb, ac := powerState(root); hb || !ac {
+		t.Fatalf("mouse battery made a desktop look like a laptop: (%v,%v)", hb, ac)
+	}
+	if _, ok := NewBattery(root); ok {
+		t.Fatal("mouse battery reported as the machine battery")
+	}
+}
+
+func TestRAPLDeltaNoMax(t *testing.T) {
+	if d, ok := raplDelta(5, 10, 0); !ok || d != 5 {
+		t.Fatalf("plain delta without max: %d %v", d, ok)
+	}
+	if _, ok := raplDelta(10, 5, 0); ok {
+		t.Fatal("a decrease with unknown max must not be treated as a wrap")
+	}
+}
+
+func TestRAPLImplausibleSpikeDropped(t *testing.T) {
+	root := copyTree(t, amdRoot)
+	c, _ := NewRAPL(root)
+	t1 := time.Now()
+	collect(t, c, &protocol.Sample{Time: t1})
+	// Counter "wrapped" by a reset: 60 kJ in 5 s would be 12 kW.
+	write(t, root, "sys/class/powercap/intel-rapl:0/energy_uj", "500")
+	write(t, root, "sys/class/powercap/intel-rapl:0/max_energy_range_uj", "65532610987")
+	s := collect(t, c, &protocol.Sample{Time: t1.Add(5 * time.Second)})
+	if s.Power != nil && s.Power.CPUWatts != nil {
+		t.Fatalf("implausible reading reported: %v W", *s.Power.CPUWatts)
+	}
+}
+
+func TestElapsedConsistent(t *testing.T) {
+	if !elapsedConsistent(5*time.Second, 5*time.Second+300*time.Millisecond) {
+		t.Fatal("small jitter must be accepted")
+	}
+	if elapsedConsistent(5*time.Second, 65*time.Second) {
+		t.Fatal("suspend (wall clock ran ahead) must be rejected")
+	}
+	if elapsedConsistent(5*time.Second, time.Second) {
+		t.Fatal("clock stepped back must be rejected")
 	}
 }

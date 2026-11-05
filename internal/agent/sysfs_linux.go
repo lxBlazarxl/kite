@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/retransmit/kite/internal/protocol"
 )
@@ -101,6 +102,9 @@ func (c *cpuExtraCollector) Collect(_ context.Context, s *protocol.Sample) error
 func powerState(root string) (hasBattery, onAC bool) {
 	dirs, _ := filepath.Glob(filepath.Join(root, "sys/class/power_supply/*"))
 	for _, d := range dirs {
+		if isPeripheral(d) {
+			continue
+		}
 		typ, _ := readStr(filepath.Join(d, "type"))
 		switch typ {
 		case "Battery":
@@ -117,12 +121,22 @@ func powerState(root string) (hasBattery, onAC bool) {
 	return hasBattery, onAC
 }
 
+// isPeripheral reports supplies that power a device (wireless mouse, game
+// controller) rather than the machine itself.
+func isPeripheral(dir string) bool {
+	scope, _ := readStr(filepath.Join(dir, "scope"))
+	return scope == "Device"
+}
+
 type batteryCollector struct{ dir string }
 
 // NewBattery reports charge, state and charge/discharge power of the first battery.
 func NewBattery(root string) (Collector, bool) {
 	dirs, _ := filepath.Glob(filepath.Join(root, "sys/class/power_supply/*"))
 	for _, d := range dirs {
+		if isPeripheral(d) {
+			continue
+		}
 		if typ, _ := readStr(filepath.Join(d, "type")); typ == "Battery" {
 			return &batteryCollector{dir: d}, true
 		}
@@ -179,7 +193,7 @@ type raplDomain struct {
 type raplCollector struct {
 	domains []raplDomain
 	prev    map[string]uint64
-	prevAt  int64 // unix nanos of previous reading, 0 if none
+	prevAt  time.Time // zero if no previous reading
 }
 
 // NewRAPL reports CPU package power (and platform power where the psys
@@ -212,19 +226,36 @@ func NewRAPL(root string) (Collector, bool) {
 
 // raplDelta returns the energy used between two counter readings, allowing
 // for one wrap of the counter at max.
-func raplDelta(prev, cur, max uint64) uint64 {
+func raplDelta(prev, cur, max uint64) (uint64, bool) {
 	if cur >= prev {
-		return cur - prev
+		return cur - prev, true
 	}
-	return max - prev + cur
+	if max == 0 || prev > max {
+		return 0, false
+	}
+	return max - prev + cur, true
+}
+
+// raplMaxWatts bounds a believable reading for one domain; anything above
+// it is a counter reset, not real power.
+const raplMaxWatts = 1000
+
+// elapsedConsistent reports whether the monotonic and wall-clock time since
+// the previous reading agree. They disagree after a suspend (energy may or
+// may not have counted while asleep) or when the clock is stepped; such
+// readings are skipped.
+func elapsedConsistent(mono, wall time.Duration) bool {
+	d := wall - mono
+	return d < time.Second && d > -time.Second
 }
 
 func (c *raplCollector) Name() string { return "power.cpu" }
 
 func (c *raplCollector) Collect(_ context.Context, s *protocol.Sample) error {
-	now := s.Time.UnixNano()
-	secs := float64(now-c.prevAt) / 1e9
-	first := c.prevAt == 0 || secs <= 0
+	mono := s.Time.Sub(c.prevAt)
+	wall := s.Time.Round(0).Sub(c.prevAt.Round(0))
+	secs := mono.Seconds()
+	first := c.prevAt.IsZero() || secs <= 0 || !elapsedConsistent(mono, wall)
 	var cpuW, platW float64
 	var haveCPU, havePlat bool
 	for _, d := range c.domains {
@@ -240,7 +271,11 @@ func (c *raplCollector) Collect(_ context.Context, s *protocol.Sample) error {
 		if first || !seen {
 			continue
 		}
-		w := float64(raplDelta(prev, cur, d.max)) / 1e6 / secs
+		delta, ok := raplDelta(prev, cur, d.max)
+		w := float64(delta) / 1e6 / secs
+		if !ok || w > raplMaxWatts {
+			continue
+		}
 		if d.platform {
 			platW += w
 			havePlat = true
@@ -249,7 +284,7 @@ func (c *raplCollector) Collect(_ context.Context, s *protocol.Sample) error {
 			haveCPU = true
 		}
 	}
-	c.prevAt = now
+	c.prevAt = s.Time
 	if !haveCPU && !havePlat {
 		return nil
 	}

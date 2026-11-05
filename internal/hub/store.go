@@ -20,7 +20,7 @@ import (
 var ErrUnknownMachine = errors.New("unknown machine")
 
 const schema = `
-CREATE TABLE IF NOT EXISTS machines(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, os TEXT NOT NULL, interval_sec REAL NOT NULL, last_seen INTEGER NOT NULL, last_sample TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machines(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, os TEXT NOT NULL, interval_sec REAL NOT NULL, last_seen INTEGER NOT NULL, last_sample TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS series(id INTEGER PRIMARY KEY, machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE, key TEXT NOT NULL, UNIQUE(machine_id, key));
 CREATE TABLE IF NOT EXISTS raw(series_id INTEGER NOT NULL, ts INTEGER NOT NULL, v REAL NOT NULL, PRIMARY KEY(series_id, ts)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS rollup_1m(series_id INTEGER NOT NULL, ts INTEGER NOT NULL, avg REAL NOT NULL, max REAL NOT NULL, PRIMARY KEY(series_id, ts)) WITHOUT ROWID;
@@ -32,7 +32,15 @@ type Store struct {
 	db *sql.DB
 
 	mu     sync.Mutex
-	series map[string]map[string]int64 // machine name -> key -> series id
+	series map[string]*seriesCache // machine name -> cached series ids
+}
+
+// seriesCache holds series ids for one machine row. If the row is deleted
+// and recreated (for example by the remove-machine CLI while the hub runs)
+// the id changes and the cache is discarded.
+type seriesCache struct {
+	machineID int64
+	ids       map[string]int64
 }
 
 // OpenStore opens (creating if needed) the SQLite database at path.
@@ -47,7 +55,7 @@ func OpenStore(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
-	return &Store{db: db, series: map[string]map[string]int64{}}, nil
+	return &Store{db: db, series: map[string]*seriesCache{}}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -79,8 +87,8 @@ func (s *Store) Ingest(ctx context.Context, smp *protocol.Sample, receivedAt tim
 	}
 
 	cache := s.series[smp.Machine]
-	if cache == nil {
-		cache = map[string]int64{}
+	if cache == nil || cache.machineID != mid {
+		cache = &seriesCache{machineID: mid, ids: map[string]int64{}}
 	}
 	insert, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO raw(series_id, ts, v) VALUES(?, ?, ?)`)
 	if err != nil {
@@ -89,7 +97,7 @@ func (s *Store) Ingest(ctx context.Context, smp *protocol.Sample, receivedAt tim
 	defer insert.Close()
 	added := map[string]int64{}
 	for _, p := range protocol.Flatten(smp) {
-		id, ok := cache[p.Key]
+		id, ok := cache.ids[p.Key]
 		if !ok {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO series(machine_id, key) VALUES(?, ?) ON CONFLICT DO NOTHING`, mid, p.Key); err != nil {
 				return err
@@ -108,7 +116,7 @@ func (s *Store) Ingest(ctx context.Context, smp *protocol.Sample, receivedAt tim
 	}
 	// Only cache ids once the transaction that created them is committed.
 	for k, id := range added {
-		cache[k] = id
+		cache.ids[k] = id
 	}
 	s.series[smp.Machine] = cache
 	return nil
