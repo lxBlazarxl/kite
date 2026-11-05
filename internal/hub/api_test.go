@@ -262,3 +262,52 @@ func TestHTTPServerTimeouts(t *testing.T) {
 		t.Fatal("server-wide read/write timeouts would kill SSE streams")
 	}
 }
+
+func TestSeries10mAPI(t *testing.T) {
+	h := newTestHub(t, nil)
+	base := t0.Unix() / 600 * 600
+	for i := int64(0); i < 3; i++ {
+		h.now = time.Unix(base+i*60, 0)
+		h.ingest(sample("pc", "linux", float64(10*(i+1))))
+	}
+	if err := h.st.Rollup(bg, time.Unix(base+700, 0)); err != nil {
+		t.Fatal(err)
+	}
+	var got seriesJSON
+	decode(t, h.do("GET", fmt.Sprintf("/api/v1/machines/pc/series?key=cpu.total&from=%d&to=%d&res=10m", base, base+600), "", nil), &got)
+	want := [][]float64{{float64(base), 20, 30}}
+	if got.Resolution != "10m" || got.Step != 600 || !reflect.DeepEqual(got.Series["cpu.total"], want) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestSeriesKeyCap(t *testing.T) {
+	h := newTestHub(t, nil)
+	h.ingest(sample("pc", "linux", 1))
+	keys := func(n int) string {
+		var b strings.Builder
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, "&key=k%d", i)
+		}
+		return b.String()
+	}
+	if r := h.do("GET", "/api/v1/machines/pc/series?from=1&to=2"+keys(65), "", nil); r.StatusCode != 400 {
+		t.Fatalf("65 keys: %d", r.StatusCode)
+	}
+	if r := h.do("GET", "/api/v1/machines/pc/series?from=1&to=2"+keys(64), "", nil); r.StatusCode != 200 {
+		t.Fatalf("64 keys: %d", r.StatusCode)
+	}
+}
+
+func TestSeriesStreamedMatchesShape(t *testing.T) {
+	h := newTestHub(t, nil)
+	h.ingest(sample("pc", "linux", 10))
+	var got seriesJSON
+	path := fmt.Sprintf("/api/v1/machines/pc/series?key=mem.used&key=cpu.total&key=gpu.0.util&from=%d&to=%d&res=raw", t0.Unix()-1, t0.Unix()+1)
+	decode(t, h.do("GET", path, "", nil), &got)
+	ts := float64(t0.Unix())
+	want := map[string][][]float64{"mem.used": {{ts, 50}}, "cpu.total": {{ts, 10}}, "gpu.0.util": {}}
+	if got.Resolution != "raw" || got.Step != 5 || !reflect.DeepEqual(got.Series, want) {
+		t.Fatalf("got %+v", got)
+	}
+}

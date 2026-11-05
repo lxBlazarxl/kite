@@ -75,11 +75,17 @@ func (s *Store) Prune(ctx context.Context, now time.Time, rawRetention, rollupRe
 	return err
 }
 
-// ChooseResolution picks raw data for short, recent ranges and 1-minute
-// rollups otherwise.
+// ChooseResolution keeps every series near or under ~1,500 points: raw for
+// short recent ranges, 1-minute rollups up to 36 hours, 10-minute buckets
+// beyond.
 func ChooseResolution(from, to, now time.Time, rawRetention time.Duration) Resolution {
-	if to.Sub(from) <= 3*time.Hour && !from.Before(now.Add(-rawRetention)) {
+	span := to.Sub(from)
+	switch {
+	case span <= 3*time.Hour && !from.Before(now.Add(-rawRetention)):
 		return ResRaw
+	case span <= 36*time.Hour:
+		return Res1m
+	default:
+		return Res10m
 	}
-	return Res1m
 }
