@@ -1,3 +1,4 @@
+import type { Unit } from './series'
 import type { Sample } from './types'
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
@@ -46,4 +47,28 @@ export function formatUptime(sec?: number): string {
 export function platformLabel(s: Sample): string {
   const p = s.platform
   return p ? p.charAt(0).toUpperCase() + p.slice(1) : s.os
+}
+
+/** Formats a chart value in its unit; null or undefined gives ''. */
+export function formatUnit(unit: Unit, v: number | null | undefined): string {
+  if (v === null || v === undefined) return ''
+  switch (unit) {
+    case 'pct':
+      return `${v.toFixed(v < 10 ? 1 : 0)}%`
+    case 'bytes':
+      return formatBytes(v)
+    case 'bps':
+      return formatRate(v)
+    case 'watts':
+      return formatWatts(v)
+    case 'celsius':
+      return `${v.toFixed(0)}°C`
+  }
+}
+
+/** Top of a chart's y axis: fixed for percentages, with a floor elsewhere so flat lines get sensible ticks. */
+export function yMax(unit: Unit, max: number): number {
+  if (unit === 'pct') return 100
+  const floor = unit === 'bytes' || unit === 'bps' ? 1024 : 1
+  return Math.max(max * 1.1, floor)
 }

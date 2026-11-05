@@ -2,8 +2,8 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { formatBytes, formatRate } from '../lib/format'
-import { alignSeries, type ChartSpec, type Unit } from '../lib/series'
+import { formatUnit, yMax } from '../lib/format'
+import { alignSeries, type ChartSpec } from '../lib/series'
 
 const props = defineProps<{
   spec: ChartSpec
@@ -23,22 +23,8 @@ let resizeObs: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
 
 const PALETTE = ['--cpu', '--ram', '--gpu', '--c4', '--c5', '--c6']
-
-function fmt(unit: Unit, v: number | null | undefined): string {
-  if (v === null || v === undefined) return ''
-  switch (unit) {
-    case 'pct':
-      return `${v.toFixed(v < 10 ? 1 : 0)}%`
-    case 'bytes':
-      return formatBytes(v)
-    case 'bps':
-      return formatRate(v)
-    case 'watts':
-      return `${v.toFixed(1)} W`
-    case 'celsius':
-      return `${v.toFixed(0)}°C`
-  }
-}
+// Axis steps in round binary amounts (512 MB, 1 GB) for byte charts.
+const BINARY_INCRS = [0, 1, 2, 3, 4, 5].flatMap((e) => [1, 2, 4, 8, 16, 32, 64, 128, 256, 512].map((m) => m * 1024 ** e))
 
 function css(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -57,13 +43,14 @@ function build() {
   const bands: uPlot.Band[] = []
   props.spec.series.forEach((s, i) => {
     const color = css(PALETTE[i % PALETTE.length])
-    series.push({ label: s.label, stroke: color, width: 1.5, spanGaps: false, value: (_u, v) => fmt(props.spec.unit, v) })
+    series.push({ label: s.label, stroke: color, width: 1.5, spanGaps: false, value: (_u, v) => formatUnit(props.spec.unit, v) })
     if (props.band) {
       const avgIdx = series.length - 1
-      series.push({ label: `${s.label} peak`, stroke: 'transparent', width: 0, spanGaps: false, value: (_u, v) => fmt(props.spec.unit, v) })
+      series.push({ label: `${s.label} peak`, stroke: 'transparent', width: 0, spanGaps: false, value: (_u, v) => formatUnit(props.spec.unit, v) })
       bands.push({ series: [series.length - 1, avgIdx], fill: color + '33' })
     }
   })
+  const binary = props.spec.unit === 'bytes' || props.spec.unit === 'bps'
   const opts: uPlot.Options = {
     width: el.value.clientWidth,
     height: 170,
@@ -72,11 +59,11 @@ function build() {
     cursor: { drag: { x: true, y: false } },
     scales: {
       x: { time: true },
-      y: props.spec.unit === 'pct' ? { range: [0, 100] } : { range: (_u, _min, max) => [0, max > 0 ? max * 1.1 : 1] },
+      y: { range: (_u, _min, max) => [0, yMax(props.spec.unit, max ?? 0)] },
     },
     axes: [
       { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } },
-      { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: 64, values: (_u, vals) => vals.map((v) => fmt(props.spec.unit, v)) },
+      { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: 84, incrs: binary ? BINARY_INCRS : undefined, values: (_u, vals) => vals.map((v) => formatUnit(props.spec.unit, v)) },
     ],
     hooks: {
       setSelect: [() => (zoomed = true)],

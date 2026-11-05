@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import LoginView from './components/LoginView.vue'
+import MachineDetail from './components/MachineDetail.vue'
 import OverviewTable from './components/OverviewTable.vue'
 import { api } from './lib/api'
 import { nowSec } from './lib/clock'
@@ -78,7 +79,7 @@ const counts = computed(() => {
   <main class="main">
     <LoginView v-if="route.name === 'login'" :next="route.next" @logged-in="connect" />
     <OverviewTable v-else-if="route.name === 'overview'" />
-    <p v-else class="muted">Machine page for {{ route.machine }} arrives in the next step.</p>
+    <MachineDetail v-else :key="route.machine" :name="route.machine" :range="route.range" />
   </main>
 
   <footer v-if="route.name !== 'login'" class="foot muted">
