@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/retransmit/kite/internal/protocol"
+	"github.com/retransmit/kite/internal/web"
 )
 
 const (
@@ -59,10 +60,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/machines/{name}/series", s.requireSession(s.handleSeries))
 	mux.HandleFunc("DELETE /api/v1/machines/{name}", s.requireSession(s.handleDelete))
 	mux.HandleFunc("GET /api/v1/stream", s.requireSession(s.handleStream))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Write([]byte("kite hub is running; web UI arrives in a later release\n"))
-	})
+	mux.HandleFunc("GET /api/v1/session", s.handleSession)
+	mux.Handle("GET /", web.Handler())
 	return mux
 }
 

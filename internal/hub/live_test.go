@@ -49,6 +49,9 @@ func TestStreamReceivesSample(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
 		t.Fatalf("content type %q", ct)
 	}
+	if v := resp.Header.Get("X-Accel-Buffering"); v != "no" {
+		t.Fatalf("X-Accel-Buffering %q", v)
+	}
 	for h.srv.broker.count() == 0 {
 		time.Sleep(5 * time.Millisecond)
 	}

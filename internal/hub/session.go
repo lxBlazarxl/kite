@@ -99,3 +99,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, _ *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleSession tells the page whether a password is set and whether this
+// browser is logged in. It never requires a session itself.
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	required := s.cfg.WebPassword != ""
+	writeJSON(w, map[string]bool{"password_required": required, "logged_in": !required || s.validSession(r)})
+}

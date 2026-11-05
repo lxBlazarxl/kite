@@ -213,12 +213,11 @@ func TestDeleteMachineAPI(t *testing.T) {
 	}
 }
 
-func TestRootPlaceholder(t *testing.T) {
+func TestRootServesPage(t *testing.T) {
 	h := newTestHub(t, nil)
 	r := h.do("GET", "/", "", nil)
-	b, _ := io.ReadAll(r.Body)
-	if r.StatusCode != 200 || !strings.Contains(string(b), "kite hub is running") {
-		t.Fatalf("%d %s", r.StatusCode, b)
+	if r.StatusCode != 200 || !strings.HasPrefix(r.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("%d %v", r.StatusCode, r.Header)
 	}
 }
 
