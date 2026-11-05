@@ -4,7 +4,7 @@ package agent
 
 // Detect returns the collectors available on this machine, in sample order.
 func Detect(cfg Config) []Collector {
-	cols := []Collector{NewCPU()}
+	cols := []Collector{NewHost(), NewCPU()}
 	if c, ok := NewCPUExtra(cfg.Root); ok {
 		cols = append(cols, c)
 	}

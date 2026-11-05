@@ -87,3 +87,9 @@ func TestSampleJSONOmitsNil(t *testing.T) {
 		t.Fatalf("round trip lost unavailable: %v", back.Unavailable)
 	}
 }
+
+func TestFlattenIgnoresHostFields(t *testing.T) {
+	if n := len(Flatten(&Sample{UptimeSec: 100, Platform: "arch"})); n != 0 {
+		t.Fatalf("host fields must not become series, got %d points", n)
+	}
+}

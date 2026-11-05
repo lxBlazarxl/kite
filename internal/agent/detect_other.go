@@ -4,7 +4,7 @@ package agent
 
 // Detect returns the collectors available on this machine, in sample order.
 func Detect(cfg Config) []Collector {
-	cols := []Collector{NewCPU(), NewMemory(), NewDisk(), NewNet(cfg.NetInclude, cfg.NetExclude)}
+	cols := []Collector{NewHost(), NewCPU(), NewMemory(), NewDisk(), NewNet(cfg.NetInclude, cfg.NetExclude)}
 	if c, ok := NewNvidia(cfg.Root); ok {
 		cols = append(cols, c)
 	}
