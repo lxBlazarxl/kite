@@ -18,25 +18,34 @@ const maxIngestBytes = 1 << 20
 
 // Server serves the hub HTTP API.
 type Server struct {
-	st  *Store
-	cfg Config
-	now func() time.Time
+	st     *Store
+	cfg    Config
+	now    func() time.Time
+	broker *Broker
+	key    []byte
 }
 
 // NewServer builds a server. now is the clock used for receive times and
 // online checks.
 func NewServer(st *Store, cfg Config, now func() time.Time) *Server {
-	return &Server{st: st, cfg: cfg, now: now}
+	srv := &Server{st: st, cfg: cfg, now: now, broker: NewBroker()}
+	if cfg.WebPassword != "" {
+		srv.key = sessionKey(st, cfg.WebPassword)
+	}
+	return srv
 }
 
 // Handler returns the HTTP routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/ingest", s.handleIngest)
-	mux.HandleFunc("GET /api/v1/machines", s.handleMachines)
-	mux.HandleFunc("GET /api/v1/machines/{name}/keys", s.handleKeys)
-	mux.HandleFunc("GET /api/v1/machines/{name}/series", s.handleSeries)
-	mux.HandleFunc("DELETE /api/v1/machines/{name}", s.handleDelete)
+	mux.HandleFunc("POST /api/v1/login", s.handleLogin)
+	mux.HandleFunc("POST /api/v1/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/v1/machines", s.requireSession(s.handleMachines))
+	mux.HandleFunc("GET /api/v1/machines/{name}/keys", s.requireSession(s.handleKeys))
+	mux.HandleFunc("GET /api/v1/machines/{name}/series", s.requireSession(s.handleSeries))
+	mux.HandleFunc("DELETE /api/v1/machines/{name}", s.requireSession(s.handleDelete))
+	mux.HandleFunc("GET /api/v1/stream", s.requireSession(s.handleStream))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte("kite hub is running; web UI arrives in a later release\n"))
@@ -44,12 +53,15 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// RunMaintenance rolls up every minute and prunes every 10 minutes until ctx ends.
+// RunMaintenance rolls up every minute, prunes every 10 minutes and
+// publishes machine status every 5 seconds until ctx ends.
 func (s *Server) RunMaintenance(ctx context.Context) {
 	rollup := time.NewTicker(time.Minute)
 	prune := time.NewTicker(10 * time.Minute)
 	defer rollup.Stop()
 	defer prune.Stop()
+	status := time.NewTicker(5 * time.Second)
+	defer status.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -58,6 +70,8 @@ func (s *Server) RunMaintenance(ctx context.Context) {
 			if err := s.st.Rollup(ctx, s.now()); err != nil {
 				log.Printf("rollup: %v", err)
 			}
+		case <-status.C:
+			s.PublishStatus(ctx)
 		case <-prune.C:
 			if err := s.st.Prune(ctx, s.now(), s.cfg.RawRetention, s.cfg.RollupRetention); err != nil {
 				log.Printf("prune: %v", err)
@@ -111,9 +125,6 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	s.afterIngest(&smp)
 	w.WriteHeader(http.StatusNoContent)
 }
-
-// afterIngest is a hook for live updates (set up in live.go).
-func (s *Server) afterIngest(*protocol.Sample) {}
 
 type machineOut struct {
 	Name        string          `json:"name"`
