@@ -1,0 +1,21 @@
+{
+ "read": "2026-01-01T00:00:00.000000000Z",
+ "preread": "0001-01-01T00:00:00Z",
+ "pids_stats": {"current": 12, "limit": 4096},
+ "num_procs": 0,
+ "cpu_stats": {
+  "cpu_usage": {"total_usage": 51234567000, "usage_in_kernelmode": 8123456000, "usage_in_usermode": 43111111000},
+  "system_cpu_usage": 1234567890000000,
+  "online_cpus": 4,
+  "throttling_data": {"periods": 0, "throttled_periods": 0, "throttled_time": 0}
+ },
+ "precpu_stats": {"cpu_usage": {"total_usage": 0, "usage_in_kernelmode": 0, "usage_in_usermode": 0}, "throttling_data": {"periods": 0, "throttled_periods": 0, "throttled_time": 0}},
+ "memory_stats": {
+  "usage": 20971520,
+  "stats": {"active_anon": 4194304, "active_file": 2097152, "anon": 8388608, "file": 10485760, "inactive_anon": 0, "inactive_file": 6291456},
+  "limit": 8589934592
+ },
+ "name": "/example",
+ "id": "0000000000000000000000000000000000000000000000000000000000000000",
+ "networks": {"eth0": {"rx_bytes": 1048576, "rx_packets": 1000, "rx_errors": 0, "rx_dropped": 0, "tx_bytes": 524288, "tx_packets": 500, "tx_errors": 0, "tx_dropped": 0}}
+}
