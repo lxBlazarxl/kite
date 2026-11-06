@@ -37,44 +37,52 @@ Missing data is shown as missing, never as zero. On laptops the NVIDIA GPU is on
 
 ## Getting started
 
-Release binaries and a Docker image for the hub are planned. For now, build from source with Go 1.26 or newer:
+### 1. Run the hub
+
+The hub runs as a container. On the machine that will host it:
 
 ```sh
-git clone https://github.com/retransmit/kite.git
-cd kite
-CGO_ENABLED=0 go build -o bin/ ./cmd/...                                         # kite-hub, kite-agent for this machine
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/ ./cmd/kite-agent       # kite-agent.exe
+mkdir kite && cd kite
+curl -fsSLO https://raw.githubusercontent.com/retransmit/kite/main/deploy/docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/retransmit/kite/main/deploy/.env.example -o .env
+# edit .env: set AGENT_TOKEN to a long random string (openssl rand -hex 32),
+# and WEB_PASSWORD if the dashboard should need a password
+docker compose up -d
 ```
 
-No C toolchain or Node.js is needed. The dashboard is built into the hub binary.
+While the repository is private, the image needs a one-time `docker login ghcr.io` (with a GitHub token that has `read:packages`), and the two files are easiest to copy from a clone.
 
-### 1. Start the hub
+Open `http://<hub>:8420/`. To also monitor the hub's own machine, start it with `docker compose --profile agent up -d`.
 
-Pick a long random token; every agent needs it.
+### 2. Add machines
+
+Click **+ Add machine** on the dashboard, pick **Linux**, **Windows** or **Docker**, optionally type a name, and run the command it shows on the new machine. The hub serves everything the command needs, so the machine only has to reach the hub. The pop-up turns green when the machine reports.
+
+| | Command runs | Installs |
+|---|---|---|
+| Linux | `curl ... /install.sh \| sudo sh` | `/usr/local/bin/kite-agent` and a `kite-agent` systemd service (low CPU and disk priority) |
+| Windows | in an Administrator PowerShell | `C:\Program Files\Kite` and the `KiteAgent` service (delayed start); settings in `C:\ProgramData\Kite` |
+| Docker | `docker build` from the hub, then `docker run` | a `kite-agent` container that reads the host through read-only mounts |
+
+Running the same command again upgrades the agent. To remove it:
+
+- Linux: `curl -fsSL http://<hub>:8420/install.sh | sudo sh -s -- --uninstall`
+- Windows: `$env:KITE_UNINSTALL='1'; irm http://<hub>:8420/install.ps1 | iex` (Administrator PowerShell)
+- Docker: `docker rm -f kite-agent`
+
+On Linux, running as root lets the agent read CPU power (RAPL); `kite-agent -once` prints one sample as JSON to check what a machine reports.
+
+### Building from source
+
+With Go 1.26 or newer (no C toolchain or Node.js needed; the dashboard is built into the hub):
 
 ```sh
-AGENT_TOKEN=change-me ./bin/kite-hub
+git clone https://github.com/retransmit/kite.git && cd kite
+scripts/release-build.sh dev    # dist/: hubs, agents and SHA256SUMS; the hub embeds the agents
+AGENT_TOKEN=change-me dist/kite-hub-linux-amd64
 ```
 
-Open `http://<hub>:8420/`. To require a password for the dashboard, add `WEB_PASSWORD=...`.
-
-### 2. Run an agent on Linux
-
-```sh
-sudo HUB_URL=http://<hub>:8420 AGENT_TOKEN=change-me ./bin/kite-agent
-```
-
-Running as root lets it read CPU power (RAPL) and the Docker socket. Without root everything else still works. Check what a machine reports with `./bin/kite-agent -once`, which prints one sample as JSON.
-
-### 3. Install the agent on Windows
-
-From an Administrator PowerShell:
-
-```powershell
-.\kite-agent.exe install -hub http://<hub>:8420 -token change-me
-```
-
-This copies the agent to `C:\Program Files\Kite`, stores its settings in `C:\ProgramData\Kite\agent.env` (readable only by SYSTEM and Administrators), and registers the **KiteAgent** service, which starts shortly after boot. Logs go to `C:\ProgramData\Kite\agent.log`. Remove it with `.\kite-agent.exe uninstall`.
+A plain `go build ./cmd/...` also works, but that hub has no agent downloads, so **+ Add machine** asks for a release build.
 
 ### Dual-boot machines
 
@@ -127,7 +135,9 @@ Every flag can also be set with the environment variable next to it. Flags win.
 | `GET /api/v1/machines/{name}/series?key=...&from=...&to=...[&res=raw\|1m\|10m]` | History; up to 64 `key` parameters, times in unix seconds |
 | `DELETE /api/v1/machines/{name}` | Remove a machine and its history |
 | `GET /api/v1/stream` | Live samples and online status (Server-Sent Events) |
-| `POST /api/v1/login`, `POST /api/v1/logout`, `GET /api/v1/session` | Dashboard login |
+| `POST /api/v1/login`, `POST /api/v1/logout`, `GET /api/v1/session` | Dashboard login, hub version |
+| `GET /api/v1/install-info` | Agent token and version for **+ Add machine** (behind the dashboard password) |
+| `GET /install.sh`, `GET /install.ps1`, `GET /download/kite-agent-<os>-<arch>`, `GET /docker/agent.tar` | Installers, agent binaries and the agent's Docker build context (no login; nothing secret) |
 
 Rates (`*_bps`) are bytes per second. Container CPU is percent of one core and can exceed 100.
 
@@ -143,9 +153,9 @@ npm run size                      # checks the 150 KB gzipped budget
 
 Windows-only code can be tested on a Windows machine with OpenSSH: `WINTEST_HOST=<ssh host> scripts/wintest.sh ./internal/agent [test-regex]` cross-compiles the tests, copies them over and runs them there.
 
-## Status
+## Releases
 
-Kite is young. Working: Linux and Windows agents, the hub, and the dashboard. Planned: release binaries, a Docker image for the hub, and a Linux install script with a systemd unit.
+Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`: it tests, runs `scripts/release-build.sh`, publishes `ghcr.io/retransmit/kite-hub` and `ghcr.io/retransmit/kite-agent` for amd64 and arm64, and creates a GitHub release with the binaries and `SHA256SUMS`.
 
 ## License
 
