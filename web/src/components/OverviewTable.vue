@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import AddMachine from './AddMachine.vue'
 import { nowSec } from '../lib/clock'
 import { formatPct } from '../lib/format'
 import { level, overviewRow, sortMachines } from '../lib/overview'
@@ -8,14 +9,20 @@ import { store } from '../lib/store'
 
 const rows = computed(() => sortMachines(Object.values(store.machines)).map((m) => overviewRow(m, nowSec.value)))
 const width = (v?: number) => `${Math.max(0, Math.min(100, v ?? 0))}%`
+const adding = ref(false)
 </script>
 
 <template>
+  <AddMachine v-if="adding" @close="adding = false" />
   <div v-if="rows.length === 0" class="empty">
     <p>No machines yet.</p>
-    <p class="muted">Start <code>kite-agent</code> with <code>HUB_URL</code> pointing at this hub.</p>
+    <button class="add" @click="adding = true">+ Add machine</button>
   </div>
-  <div v-else class="wrap">
+  <template v-else>
+  <div class="toolbar">
+    <button class="add" @click="adding = true">+ Add machine</button>
+  </div>
+  <div class="wrap">
     <table>
       <thead>
         <tr>
@@ -62,6 +69,7 @@ const width = (v?: number) => `${Math.max(0, Math.min(100, v ?? 0))}%`
       </tbody>
     </table>
   </div>
+  </template>
 </template>
 
 <style scoped>
@@ -89,4 +97,6 @@ td.crit .num, td.crit.num { color: var(--crit); }
 td.warn .bar i { background: var(--warn); }
 td.crit .bar i { background: var(--crit); }
 .empty { text-align: center; padding: 48px 16px; }
+.toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.add { background: color-mix(in srgb, var(--ok) 30%, var(--panel)); }
 </style>
