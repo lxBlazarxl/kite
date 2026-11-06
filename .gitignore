@@ -5,3 +5,4 @@
 web/node_modules/
 internal/agentdl/bin/kite-agent-*
 /dist/
+deploy/.env
