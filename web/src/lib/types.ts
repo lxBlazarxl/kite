@@ -71,6 +71,8 @@ export interface Sample {
   interval_sec: number
   uptime_sec?: number
   platform?: string
+  /** Motherboard/ACPI sensor, reported where no CPU sensor exists (Windows). */
+  system_temp_c?: number
   cpu?: CPU
   memory?: Memory
   gpus?: GPU[]

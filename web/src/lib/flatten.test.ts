@@ -30,3 +30,7 @@ it('flattenSample matches Go protocol.Flatten (TestFlattenKeys)', () => {
 it('flattenSample of an empty sample is empty', () => {
   expect(flattenSample(base as Sample)).toEqual({})
 })
+
+it('flattenSample mirrors system temperature', () => {
+  expect(flattenSample({ ...base, system_temp_c: 51 } as Sample)).toEqual({ 'system.temp_c': 51 })
+})

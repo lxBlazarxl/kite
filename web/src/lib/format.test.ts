@@ -71,3 +71,10 @@ describe('yRange', () => {
     expect(yRange('pct', 3, 40)).toEqual([0, 100])
   })
 })
+
+describe('platformLabel on Windows', () => {
+  it('shortens Windows editions', () => {
+    const base = { v: 1, machine: 'x', hostname: 'x', time: '', interval_sec: 5 }
+    expect(platformLabel({ ...base, os: 'windows', platform: 'Microsoft Windows 11 Pro' } as Sample)).toBe('Windows 11 Pro')
+  })
+})

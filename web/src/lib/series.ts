@@ -54,7 +54,7 @@ export function chartSpecs(keys: string[]): ChartSpec[] {
     id: 'temps',
     title: 'Temperatures',
     unit: 'celsius',
-    series: [...pick([['cpu.temp_c', 'CPU']]), ...pick(gpus.map((g) => [`gpu.${g}.temp_c`, `GPU ${g}`] as [string, string]))],
+    series: [...pick([['cpu.temp_c', 'CPU'], ['system.temp_c', 'System']]), ...pick(gpus.map((g) => [`gpu.${g}.temp_c`, `GPU ${g}`] as [string, string]))],
   })
 
   const groups = (prefix: string, suffixes: string[]) => {
