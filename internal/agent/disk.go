@@ -19,9 +19,12 @@ var skipMountPrefixes = []string{"/var/lib/docker/", "/snap/", "/run/"}
 
 // selectPartitions keeps real filesystems, one entry per device (the
 // shortest mountpoint, so bind mounts collapse), sorted by mountpoint.
-func selectPartitions(parts []disk.PartitionStat) []disk.PartitionStat {
+func selectPartitions(parts []disk.PartitionStat, hostRoot string) []disk.PartitionStat {
 	byDev := map[string]disk.PartitionStat{}
 	for _, p := range parts {
+		if hostRoot != "" && (p.Mountpoint == hostRoot || strings.HasPrefix(p.Mountpoint, hostRoot+"/")) {
+			continue // the container's own view of the host, not a host disk
+		}
 		if skipFSTypes[p.Fstype] {
 			continue
 		}
@@ -47,10 +50,19 @@ func selectPartitions(parts []disk.PartitionStat) []disk.PartitionStat {
 	return out
 }
 
-type diskCollector struct{ rates *Rates }
+type diskCollector struct {
+	rates    *Rates
+	hostRoot string
+}
 
 // NewDisk reports usage and read/write throughput per filesystem.
-func NewDisk() Collector { return &diskCollector{rates: NewRates()} }
+func NewDisk() Collector { return NewDiskAt("") }
+
+// NewDiskAt is NewDisk for an agent in a container with the host's / at
+// hostRoot: disks are read through it but reported with host paths.
+func NewDiskAt(hostRoot string) Collector {
+	return &diskCollector{rates: NewRates(), hostRoot: hostRoot}
+}
 
 func (c *diskCollector) Name() string { return "disk" }
 
@@ -60,13 +72,13 @@ func (c *diskCollector) Collect(ctx context.Context, s *protocol.Sample) error {
 		return err
 	}
 	io, _ := disk.IOCountersWithContext(ctx)
-	for _, p := range selectPartitions(parts) {
-		u, err := disk.UsageWithContext(ctx, p.Mountpoint)
+	for _, p := range selectPartitions(parts, c.hostRoot) {
+		u, err := disk.UsageWithContext(ctx, usagePath(c.hostRoot, p.Mountpoint))
 		if err != nil {
 			continue
 		}
 		d := protocol.Disk{Mount: p.Mountpoint, Device: p.Device, FSType: p.Fstype, TotalBytes: u.Total, UsedBytes: u.Used}
-		dev := ioDeviceName(p.Device)
+		dev := ioDeviceName(usagePath(c.hostRoot, p.Device))
 		if st, ok := io[dev]; ok {
 			if v, ok := c.rates.Rate("disk."+dev+".r", st.ReadBytes, s.Time); ok {
 				d.ReadBps = &v

@@ -8,7 +8,7 @@ func Detect(cfg Config) []Collector {
 	if c, ok := NewCPUExtra(cfg.Root); ok {
 		cols = append(cols, c)
 	}
-	cols = append(cols, NewMemory(), NewDisk(), NewNet(cfg.NetInclude, cfg.NetExclude))
+	cols = append(cols, NewMemory(), NewDiskAt(cfg.HostRoot), NewNet(cfg.NetInclude, cfg.NetExclude))
 	if c, ok := NewBattery(cfg.Root); ok {
 		cols = append(cols, c)
 	}

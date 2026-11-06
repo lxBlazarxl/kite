@@ -22,7 +22,7 @@ func TestSelectPartitions(t *testing.T) {
 		{Device: "efivarfs", Mountpoint: "/sys/firmware/efi/efivars", Fstype: "efivarfs"},
 	}
 	var got []string
-	for _, p := range selectPartitions(in) {
+	for _, p := range selectPartitions(in, "") {
 		got = append(got, p.Mountpoint)
 	}
 	if want := []string{"/", "/boot/efi", "/data"}; !reflect.DeepEqual(got, want) {
