@@ -78,3 +78,14 @@ func (c ctxCollector) Collect(ctx context.Context, _ *protocol.Sample) error {
 	<-ctx.Done()
 	return ctx.Err()
 }
+
+func TestCollectTimed(t *testing.T) {
+	cols := []Collector{
+		fakeCollector{"fast", func(*protocol.Sample) error { return nil }},
+		fakeCollector{"slow", func(*protocol.Sample) error { time.Sleep(20 * time.Millisecond); return nil }},
+	}
+	_, timings := CollectTimed(context.Background(), Config{Name: "pc", Interval: 5 * time.Second}, cols, time.Now())
+	if len(timings) != 2 || timings[0].Name != "fast" || timings[1].Name != "slow" || timings[1].Took < 20*time.Millisecond {
+		t.Fatalf("got %+v", timings)
+	}
+}

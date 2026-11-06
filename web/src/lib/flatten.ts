@@ -12,6 +12,7 @@ export function flattenSample(s: Sample): Record<string, number> {
     put('cpu.freq_mhz', s.cpu.freq_mhz)
     put('cpu.temp_c', s.cpu.temp_c)
   }
+  put('system.temp_c', s.system_temp_c)
   if (s.memory) {
     put('mem.total', s.memory.total_bytes)
     put('mem.used', s.memory.used_bytes)

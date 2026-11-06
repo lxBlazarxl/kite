@@ -45,7 +45,7 @@ export function formatUptime(sec?: number): string {
 }
 
 export function platformLabel(s: Sample): string {
-  const p = s.platform
+  const p = s.platform?.replace(/^Microsoft /, '')
   return p ? p.charAt(0).toUpperCase() + p.slice(1) : s.os
 }
 

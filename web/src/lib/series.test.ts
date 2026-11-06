@@ -98,3 +98,11 @@ describe('isIdle threshold', () => {
     expect(isIdle(spec, { 'net.wg0.rx_bps': [[0, 40], [5, 1024]] })).toBe(false)
   })
 })
+
+describe('system temperature', () => {
+  it('temps chart includes the system sensor', () => {
+    const temps = chartSpecs(['system.temp_c', 'gpu.1.temp_c']).find((c) => c.id === 'temps')!
+    expect(temps.series.map((s) => s.key)).toEqual(['system.temp_c', 'gpu.1.temp_c'])
+    expect(temps.series[0].label).toBe('System')
+  })
+})

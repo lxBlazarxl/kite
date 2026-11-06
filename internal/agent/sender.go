@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/retransmit/kite/internal/protocol"
@@ -66,7 +67,11 @@ func Run(ctx context.Context, cfg Config, cols []Collector, send func(context.Co
 	tick := func() {
 		// CollectOnce bounds each collector; the send gets its own budget
 		// (the Sender's timeout) so a slow collector cannot starve it.
-		err := send(ctx, CollectOnce(ctx, cfg, cols, time.Now()))
+		smp, timings := CollectTimed(ctx, cfg, cols, time.Now())
+		if cfg.DebugTiming {
+			logf("%s", formatTimings(timings))
+		}
+		err := send(ctx, smp)
 		switch {
 		case err != nil && !failing:
 			failing = true
@@ -87,4 +92,16 @@ func Run(ctx context.Context, cfg Config, cols []Collector, send func(context.Co
 			tick()
 		}
 	}
+}
+
+// formatTimings renders one sample's collector durations as
+// "timing total=1.2ms host=10µs cpu=300µs ...".
+func formatTimings(ts []CollectorTiming) string {
+	var total time.Duration
+	var b strings.Builder
+	for _, t := range ts {
+		total += t.Took
+		fmt.Fprintf(&b, " %s=%s", t.Name, t.Took.Round(time.Microsecond))
+	}
+	return fmt.Sprintf("timing total=%s%s", total.Round(time.Microsecond), b.String())
 }

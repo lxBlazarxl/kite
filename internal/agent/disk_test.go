@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -30,6 +31,9 @@ func TestSelectPartitions(t *testing.T) {
 }
 
 func TestDiskReal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows mounts are drive letters; see TestDiskRealWindows")
+	}
 	cfg := Config{Name: "pc", Interval: time.Second, Root: "/"}
 	cols := []Collector{NewDisk()}
 	CollectOnce(context.Background(), cfg, cols, time.Now())
@@ -58,5 +62,14 @@ func TestIODeviceNameFollowsMapper(t *testing.T) {
 	}
 	if got := ioDeviceName("/dev/does-not-exist-sda1"); got != "does-not-exist-sda1" {
 		t.Fatalf("plain device: got %q", got)
+	}
+}
+
+func TestIODeviceNameDriveLetter(t *testing.T) {
+	if got := ioDeviceName("C:"); got != "C:" {
+		t.Errorf("C: -> %q", got)
+	}
+	if got := ioDeviceName(`D:\`); got != "D:" {
+		t.Errorf(`D:\ -> %q`, got)
 	}
 }

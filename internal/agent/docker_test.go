@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -139,5 +140,110 @@ func TestParseStatsReal(t *testing.T) {
 	total, system, cpus, mem, err := parseStats(b)
 	if err != nil || mem == 0 || cpus == 0 || total == 0 || system == 0 {
 		t.Fatalf("total %d system %d cpus %d mem %d err %v", total, system, cpus, mem, err)
+	}
+}
+
+func TestNpipePath(t *testing.T) {
+	if p, ok := npipePath("npipe:////./pipe/docker_engine"); !ok || p != `\\.\pipe\docker_engine` {
+		t.Fatalf("got %q %v", p, ok)
+	}
+	if _, ok := npipePath("unix:///var/run/docker.sock"); ok {
+		t.Fatal("unix host is not a pipe")
+	}
+}
+
+type countingCollector struct {
+	calls int
+	err   error
+}
+
+func (c *countingCollector) Name() string { return "docker" }
+func (c *countingCollector) Collect(_ context.Context, s *protocol.Sample) error {
+	c.calls++
+	if c.err != nil {
+		return c.err
+	}
+	s.Docker = &protocol.Docker{}
+	return nil
+}
+
+func TestLazyDockerAppearsAndDisappears(t *testing.T) {
+	now := time.Unix(1000, 0)
+	present, checks := false, 0
+	inner := &countingCollector{}
+	c := newLazyDocker(inner, func() bool { checks++; return present }, 60*time.Second, func() time.Time { return now })
+
+	s := &protocol.Sample{}
+	if err := c.Collect(context.Background(), s); err != nil || s.Docker != nil || s.Unavailable != nil || checks != 1 {
+		t.Fatalf("absent: err %v docker %v unavailable %v checks %d", err, s.Docker, s.Unavailable, checks)
+	}
+	now = now.Add(30 * time.Second)
+	c.Collect(context.Background(), &protocol.Sample{})
+	if checks != 1 || inner.calls != 0 {
+		t.Fatalf("rechecked too soon: checks %d calls %d", checks, inner.calls)
+	}
+	present = true
+	now = now.Add(31 * time.Second)
+	s = &protocol.Sample{}
+	if err := c.Collect(context.Background(), s); err != nil || s.Docker == nil || inner.calls != 1 {
+		t.Fatalf("present: err %v docker %v calls %d", err, s.Docker, inner.calls)
+	}
+	present, inner.err = false, errors.New("open \\\\.\\pipe\\docker_engine: file not found")
+	s = &protocol.Sample{}
+	if err := c.Collect(context.Background(), s); err != nil || s.Unavailable != nil || s.Docker != nil {
+		t.Fatalf("disappeared: err %v unavailable %v", err, s.Unavailable)
+	}
+	now = now.Add(5 * time.Second)
+	c.Collect(context.Background(), &protocol.Sample{})
+	if inner.calls != 2 {
+		t.Fatalf("called while known absent: %d", inner.calls)
+	}
+}
+
+type slowDocker struct{ delay time.Duration }
+
+func (slowDocker) Name() string { return "docker" }
+func (d slowDocker) Collect(_ context.Context, s *protocol.Sample) error {
+	time.Sleep(d.delay)
+	s.Docker = &protocol.Docker{Containers: []protocol.Container{{Name: "web", State: "running"}}}
+	return nil
+}
+
+func TestBackgroundDockerNeverBlocks(t *testing.T) {
+	c := newBackgroundDocker(slowDocker{200 * time.Millisecond}, 15*time.Second)
+	start := time.Now()
+	s := &protocol.Sample{Time: time.Now()}
+	if err := c.Collect(context.Background(), s); err != nil || s.Docker != nil {
+		t.Fatalf("first sample: err %v docker %v", err, s.Docker)
+	}
+	if time.Since(start) > 20*time.Millisecond {
+		t.Fatal("blocked on the docker daemon")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s = &protocol.Sample{Time: time.Now()}
+		c.Collect(context.Background(), s)
+		if s.Docker != nil && s.Docker.Containers[0].Name == "web" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("docker data never arrived")
+}
+
+type goneDocker struct{}
+
+func (goneDocker) Name() string                                    { return "docker" }
+func (goneDocker) Collect(context.Context, *protocol.Sample) error { return nil }
+
+func TestBackgroundDockerClearsWhenGone(t *testing.T) {
+	c := newBackgroundDocker(goneDocker{}, time.Millisecond)
+	for i := 0; i < 50; i++ {
+		s := &protocol.Sample{Time: time.Now()}
+		c.Collect(context.Background(), s)
+		if s.Docker != nil {
+			t.Fatal("no docker data must give no docker section")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }

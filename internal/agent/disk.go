@@ -83,6 +83,11 @@ func (c *diskCollector) Collect(ctx context.Context, s *protocol.Sample) error {
 // ioDeviceName maps a mounted device to its /proc/diskstats name, following
 // symlinks such as /dev/mapper/vg-root -> /dev/dm-0 (LVM, LUKS).
 func ioDeviceName(device string) string {
+	// Windows drive letters ("C:", `D:\`) are already the IO counter key;
+	// EvalSymlinks("C:") would resolve to the current directory on that drive.
+	if len(device) >= 2 && device[1] == ':' && len(strings.TrimRight(device, `\/`)) == 2 {
+		return strings.ToUpper(device[:2])
+	}
 	if real, err := filepath.EvalSymlinks(device); err == nil {
 		device = real
 	}

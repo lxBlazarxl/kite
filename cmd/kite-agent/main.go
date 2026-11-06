@@ -15,10 +15,35 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		var err error
+		handled := true
+		switch os.Args[1] {
+		case "install":
+			err = installService(os.Args[2:])
+		case "uninstall":
+			err = uninstallService()
+		case "service":
+			err = runService()
+		default:
+			handled = false
+		}
+		if handled {
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "kite-agent:", err)
+				os.Exit(2)
+			}
+			return
+		}
+	}
+
 	cfg, err := agent.LoadConfig(os.Args[1:], os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "kite-agent:", err)
 		os.Exit(2)
+	}
+	if err := agent.LowerPriority(); err != nil {
+		log.Printf("kite-agent: could not lower priority: %v", err)
 	}
 	cols := agent.Detect(cfg)
 	ctx := context.Background()

@@ -93,3 +93,10 @@ func TestFlattenIgnoresHostFields(t *testing.T) {
 		t.Fatalf("host fields must not become series, got %d points", n)
 	}
 }
+
+func TestFlattenSystemTemp(t *testing.T) {
+	pts := Flatten(&Sample{SystemTempC: fp(51.05)})
+	if len(pts) != 1 || pts[0].Key != "system.temp_c" || pts[0].Value != 51.05 {
+		t.Fatalf("got %v", pts)
+	}
+}

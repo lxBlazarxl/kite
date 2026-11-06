@@ -22,7 +22,8 @@ type Sample struct {
 	Time        time.Time         `json:"time"`
 	IntervalSec float64           `json:"interval_sec"`
 	UptimeSec   uint64            `json:"uptime_sec,omitempty"`
-	Platform    string            `json:"platform,omitempty"` // distro or Windows edition, e.g. "arch"
+	Platform    string            `json:"platform,omitempty"`      // distro or Windows edition, e.g. "arch"
+	SystemTempC *float64          `json:"system_temp_c,omitempty"` // motherboard/ACPI sensor where no CPU sensor exists (Windows)
 	CPU         *CPU              `json:"cpu,omitempty"`
 	Memory      *Memory           `json:"memory,omitempty"`
 	GPUs        []GPU             `json:"gpus,omitempty"`
@@ -129,6 +130,7 @@ func Flatten(s *Sample) []Point {
 		addF("cpu.freq_mhz", c.FreqMHz)
 		addF("cpu.temp_c", c.TempC)
 	}
+	addF("system.temp_c", s.SystemTempC)
 	if m := s.Memory; m != nil {
 		add("mem.total", float64(m.TotalBytes))
 		add("mem.used", float64(m.UsedBytes))

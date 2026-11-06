@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -16,8 +17,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	host, _ := os.Hostname()
-	if c.Interval != 5*time.Second || c.Name != host || len(c.NetExclude) != 5 ||
-		c.DockerHost != "unix:///var/run/docker.sock" || c.Root != "/" || !c.Once {
+	if c.Interval != 5*time.Second || c.Name != host || len(c.NetExclude) != len(splitList(defaultNetExclude(runtime.GOOS))) ||
+		c.DockerHost != defaultDockerHost(runtime.GOOS) || c.Root != "/" || !c.Once {
 		t.Fatalf("defaults wrong: %+v", c)
 	}
 }
@@ -56,5 +57,12 @@ func TestLoadConfigErrors(t *testing.T) {
 		if _, err := LoadConfig(args, env(nil)); err == nil {
 			t.Errorf("args %v: want error", args)
 		}
+	}
+}
+
+func TestLoadConfigDebugTiming(t *testing.T) {
+	c, err := LoadConfig([]string{"-once", "-debug-timing"}, env(nil))
+	if err != nil || !c.DebugTiming {
+		t.Fatalf("got %+v %v", c, err)
 	}
 }

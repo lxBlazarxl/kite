@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/retransmit/kite/internal/protocol"
 )
@@ -26,7 +27,9 @@ type dockerCollector struct {
 }
 
 // NewDocker reports container state, CPU and memory through the Docker
-// Engine API. host is unix:///path/to/docker.sock or tcp://host:port.
+// Engine API. host is unix:///path/to/docker.sock, tcp://host:port or (on
+// Windows) npipe:////./pipe/docker_engine. A named pipe counts as present;
+// wrap it in newLazyDocker so a stopped Docker Desktop costs nothing.
 func NewDocker(host string) (Collector, bool) {
 	c := &dockerCollector{prev: map[string]cpuReading{}}
 	switch {
@@ -40,6 +43,14 @@ func NewDocker(host string) (Collector, bool) {
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
 				return d.DialContext(ctx, "unix", sock)
+			},
+		}}
+	case strings.HasPrefix(host, "npipe://"):
+		path, _ := npipePath(host)
+		c.base = "http://docker"
+		c.client = &http.Client{Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return dialPipe(ctx, path)
 			},
 		}}
 	case strings.HasPrefix(host, "tcp://"):
@@ -186,4 +197,80 @@ func parseStats(b []byte) (cpuTotal, systemTotal uint64, onlineCPUs int, mem uin
 		mem -= inactive
 	}
 	return
+}
+
+// npipePath turns npipe:////./pipe/docker_engine into \\.\pipe\docker_engine.
+func npipePath(host string) (string, bool) {
+	rest, ok := strings.CutPrefix(host, "npipe://")
+	if !ok {
+		return "", false
+	}
+	return strings.ReplaceAll(rest, "/", `\`), true
+}
+
+type lazyDocker struct {
+	inner     Collector
+	exists    func() bool
+	recheck   time.Duration
+	now       func() time.Time
+	present   bool
+	lastCheck time.Time
+}
+
+// newLazyDocker skips Docker while its endpoint is absent (Docker Desktop
+// not running), checking again at most every recheck, and goes quiet again
+// when it disappears, instead of reporting an error every sample.
+func newLazyDocker(inner Collector, exists func() bool, recheck time.Duration, now func() time.Time) Collector {
+	return &lazyDocker{inner: inner, exists: exists, recheck: recheck, now: now}
+}
+
+func (l *lazyDocker) Name() string { return l.inner.Name() }
+
+func (l *lazyDocker) Collect(ctx context.Context, s *protocol.Sample) error {
+	if !l.present {
+		now := l.now()
+		if !l.lastCheck.IsZero() && now.Sub(l.lastCheck) < l.recheck {
+			return nil
+		}
+		l.lastCheck = now
+		if l.present = l.exists(); !l.present {
+			return nil
+		}
+	}
+	err := l.inner.Collect(ctx, s)
+	if err != nil && !l.exists() {
+		l.present, l.lastCheck = false, l.now()
+		return nil
+	}
+	return err
+}
+
+type backgroundDocker struct {
+	cache *cached[*protocol.Docker]
+}
+
+// newBackgroundDocker refreshes Docker every period in the background and
+// adds the latest result to each sample. Docker Desktop answers through a
+// VM and takes tens of milliseconds, so on Windows samples must not wait
+// for it. A refresh that finds nothing (Docker quit) clears the section.
+func newBackgroundDocker(inner Collector, every time.Duration) Collector {
+	fetch := func() (*protocol.Docker, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		s := &protocol.Sample{Time: time.Now()}
+		if err := inner.Collect(ctx, s); err != nil {
+			return nil, nil // show no section rather than stale containers
+		}
+		return s.Docker, nil
+	}
+	return &backgroundDocker{cache: newAsyncCached(every, fetch)}
+}
+
+func (b *backgroundDocker) Name() string { return "docker" }
+
+func (b *backgroundDocker) Collect(_ context.Context, s *protocol.Sample) error {
+	if d, ok := b.cache.get(s.Time); ok && d != nil {
+		s.Docker = d
+	}
+	return nil
 }

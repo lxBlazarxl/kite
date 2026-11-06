@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -23,9 +24,9 @@ type Config struct {
 	DockerHost string
 	Root       string
 	Once       bool
+	// DebugTiming logs how long each collector takes, once per sample.
+	DebugTiming bool
 }
-
-const defaultNetExclude = "lo,veth*,br-*,docker0,virbr*"
 
 // LoadConfig reads env vars through getenv, then lets flags in args override them.
 func LoadConfig(args []string, getenv func(string) string) (Config, error) {
@@ -46,6 +47,7 @@ func LoadConfig(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&c.Name, "name", or("AGENT_NAME", host), "machine name")
 	fs.StringVar(&interval, "interval", interval, "sample interval")
 	fs.BoolVar(&c.Once, "once", false, "print one sample as JSON and exit")
+	fs.BoolVar(&c.DebugTiming, "debug-timing", false, "log how long each collector takes")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
@@ -59,8 +61,8 @@ func LoadConfig(args []string, getenv func(string) string) (Config, error) {
 	}
 	c.Interval = d
 	c.NetInclude = splitList(getenv("NET_INCLUDE"))
-	c.NetExclude = splitList(or("NET_EXCLUDE", defaultNetExclude))
-	c.DockerHost = or("DOCKER_HOST", "unix:///var/run/docker.sock")
+	c.NetExclude = splitList(or("NET_EXCLUDE", defaultNetExclude(runtime.GOOS)))
+	c.DockerHost = or("DOCKER_HOST", defaultDockerHost(runtime.GOOS))
 	c.HubURL = strings.TrimRight(c.HubURL, "/")
 
 	if !protocol.ValidMachineName(c.Name) {
