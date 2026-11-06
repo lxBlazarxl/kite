@@ -3,8 +3,6 @@
 #   cp .env.example .env    # then set AGENT_TOKEN (and WEB_PASSWORD if you like)
 #   docker compose up -d                   # hub only
 #   docker compose --profile agent up -d   # hub and an agent for this machine
-#
-# While the repository is private, log in once: docker login ghcr.io
 services:
   hub:
     image: ghcr.io/retransmit/kite-hub:${KITE_VERSION:-latest}

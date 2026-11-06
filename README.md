@@ -50,8 +50,6 @@ curl -fsSL https://raw.githubusercontent.com/retransmit/kite/main/deploy/.env.ex
 docker compose up -d
 ```
 
-While the repository is private, the image needs a one-time `docker login ghcr.io` (with a GitHub token that has `read:packages`), and the two files are easiest to copy from a clone.
-
 Open `http://<hub>:8420/`. To also monitor the hub's own machine, start it with `docker compose --profile agent up -d`.
 
 ### 2. Add machines
