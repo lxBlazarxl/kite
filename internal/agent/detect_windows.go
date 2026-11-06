@@ -8,7 +8,7 @@ func Detect(cfg Config) []Collector {
 	if c, ok := NewCPUFreq(); ok {
 		cols = append(cols, c)
 	}
-	cols = append(cols, NewMemory(), NewDisk(), NewNet(cfg.NetInclude, cfg.NetExclude))
+	cols = append(cols, NewMemory(), NewDisk(), NewNetWindows(cfg.NetInclude, cfg.NetExclude))
 	if c, ok := NewWindowsBattery(); ok {
 		cols = append(cols, c)
 	}
