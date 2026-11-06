@@ -5,9 +5,11 @@ import {
   defaultHub,
   dockerCommand,
   hubAddressWarning,
+  hubUsable,
   linuxCommand,
-  newMachineSeen,
+  machineNameError,
   noDownloadsMessage,
+  reportStatus,
   windowsCommand,
   type InstallInfo,
 } from '../lib/install'
@@ -22,16 +24,23 @@ const name = ref('')
 const hub = ref(defaultHub(window.location))
 const info = ref<InstallInfo | null>(null)
 const error = ref('')
-const copied = ref(false)
-const before = Object.keys(store.machines)
+const copyLabel = ref('Copy')
+// Snapshot taken once machines are loaded (after install info arrives), in
+// hub time, so a machine counts as added only when it reports after this.
+let openedAt = 0
+let onlineAtOpen: string[] = []
 
 onMounted(async () => {
+  window.addEventListener('keydown', onKey)
   try {
     info.value = await api.installInfo()
   } catch {
     error.value = 'Could not load install details from the hub.'
   }
-  window.addEventListener('keydown', onKey)
+  openedAt = store.lastUpdate
+  onlineAtOpen = Object.values(store.machines)
+    .filter((m) => m.online)
+    .map((m) => m.name)
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
@@ -40,8 +49,9 @@ function onKey(e: KeyboardEvent) {
 }
 
 const warning = computed(() => hubAddressWarning(hub.value))
+const nameError = computed(() => machineNameError(name.value))
 const command = computed(() => {
-  if (!info.value) return ''
+  if (!info.value || !hubUsable(hub.value) || nameError.value) return ''
   const build = { linux: linuxCommand, windows: windowsCommand, docker: dockerCommand }[tab.value]
   return build(hub.value, info.value.token, name.value)
 })
@@ -50,27 +60,44 @@ const hint = computed(
     ({
       linux: 'Run on the new machine. Installs to /usr/local/bin with a systemd service; root lets it read CPU power.',
       windows: 'Run in an Administrator PowerShell on the new machine. Installs a Windows service that starts after boot.',
-      docker: 'Run on a Linux machine with Docker. The agent reads the host through read-only mounts.',
+      docker: 'Run on a Linux machine with Docker 23 or newer (BuildKit). The agent reads the host through read-only mounts.',
     })[tab.value],
 )
-const seen = computed(() => newMachineSeen(before, Object.keys(store.machines), name.value))
+const status = computed(() => reportStatus(Object.values(store.machines), onlineAtOpen, openedAt, name.value))
 const waitingFor = computed(() => name.value.trim() || 'the new machine')
+
+function flash(label: string) {
+  copyLabel.value = label
+  setTimeout(() => (copyLabel.value = 'Copy'), 2000)
+}
 
 async function copy() {
   try {
     await navigator.clipboard.writeText(command.value)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
+    flash('Copied')
+    return
   } catch {
-    // Clipboard blocked (plain http on another host): select the text instead.
-    const el = document.getElementById('kite-install-cmd')
-    if (el) window.getSelection()?.selectAllChildren(el)
+    // navigator.clipboard only exists on https and localhost; a hub on plain
+    // http needs the older copy command on a selection.
   }
+  const el = document.getElementById('kite-install-cmd')
+  if (!el) return
+  window.getSelection()?.selectAllChildren(el)
+  flash(document.execCommand('copy') ? 'Copied' : 'Press Ctrl+C')
+}
+
+// Close on a click outside the dialog, but not when a text selection that
+// started inside it ends outside.
+let downOnBackdrop = false
+const onDown = (e: MouseEvent) => (downOnBackdrop = e.target === e.currentTarget)
+const onUp = (e: MouseEvent) => {
+  if (downOnBackdrop && e.target === e.currentTarget) emit('close')
+  downOnBackdrop = false
 }
 </script>
 
 <template>
-  <div class="backdrop" @click.self="emit('close')">
+  <div class="backdrop" @mousedown="onDown" @mouseup="onUp">
     <div class="modal" role="dialog" aria-label="Add a machine">
       <header>
         <h2>Add a machine</h2>
@@ -95,21 +122,27 @@ async function copy() {
           <span class="lbl muted">Hub address</span>
           <input v-model="hub" spellcheck="false" />
         </label>
+        <p v-if="nameError" class="warn">{{ nameError }}</p>
         <p v-if="warning" class="warn">{{ warning }}</p>
 
-        <pre id="kite-install-cmd" class="cmd">{{ command }}</pre>
-        <div class="row">
-          <button class="primary" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
-          <span class="muted small">{{ hint }}</span>
-        </div>
+        <template v-if="command">
+          <pre id="kite-install-cmd" class="cmd">{{ command }}</pre>
+          <div class="row">
+            <button class="primary" @click="copy">{{ copyLabel }}</button>
+            <span class="muted small">{{ hint }}</span>
+          </div>
+        </template>
         <p v-if="!store.session?.password_required" class="muted small">
           Anyone who can open this dashboard can see the agent token. Set WEB_PASSWORD on a shared network.
         </p>
 
-        <p v-if="seen" class="ok">
-          ✓ {{ seen }} is online · <a :href="machinePath(seen)" @click="emit('close')">Open it</a>
+        <p v-if="status.state === 'online'" class="ok">
+          ✓ {{ status.name }} is online · <a :href="machinePath(status.name)" @click="emit('close')">Open it</a>
         </p>
-        <p v-else class="waiting">● Waiting for {{ waitingFor }} to report…</p>
+        <p v-else-if="status.state === 'already'" class="muted small">
+          {{ status.name }} is already reporting; running the command again upgrades it.
+        </p>
+        <p v-else-if="command" class="waiting">● Waiting for {{ waitingFor }} to report…</p>
       </template>
     </div>
   </div>

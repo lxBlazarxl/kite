@@ -9,13 +9,21 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
 type shEnv struct {
-	prefix, log, systemctl string
-	served                 []byte
-	srv                    *httptest.Server
+	prefix, log, systemctl, systemdDir string
+	mu                                 sync.Mutex
+	served                             []byte
+	srv                                *httptest.Server
+}
+
+func (e *shEnv) serve(b []byte) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.served = b
 }
 
 func newShEnv(t *testing.T) *shEnv {
@@ -24,12 +32,15 @@ func newShEnv(t *testing.T) *shEnv {
 	stubs := t.TempDir()
 	e.log = filepath.Join(stubs, "systemctl.log")
 	e.systemctl = filepath.Join(stubs, "systemctl")
+	e.systemdDir = t.TempDir() // stands in for /run/systemd/system on a systemd-booted machine
 	os.WriteFile(e.systemctl, []byte("#!/bin/sh\necho \"$*\" >> "+e.log+"\n"), 0o755)
 	e.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/download/kite-agent-linux-amd64" {
 			http.NotFound(w, r)
 			return
 		}
+		e.mu.Lock()
+		defer e.mu.Unlock()
 		w.Write(e.served)
 	}))
 	t.Cleanup(e.srv.Close)
@@ -39,7 +50,7 @@ func newShEnv(t *testing.T) *shEnv {
 func (e *shEnv) run(t *testing.T, env map[string]string, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command("sh", append([]string{"install.sh"}, args...)...)
-	cmd.Env = append(os.Environ(), "KITE_PREFIX="+e.prefix, "KITE_SKIP_ROOT_CHECK=1", "KITE_SYSTEMCTL="+e.systemctl, "KITE_ARCH=x86_64")
+	cmd.Env = append(os.Environ(), "KITE_PREFIX="+e.prefix, "KITE_SKIP_ROOT_CHECK=1", "KITE_SYSTEMCTL="+e.systemctl, "KITE_ARCH=x86_64", "KITE_SYSTEMD_DIR="+e.systemdDir)
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
@@ -102,7 +113,7 @@ func TestInstallShInstalls(t *testing.T) {
 func TestInstallShUpgrade(t *testing.T) {
 	e := newShEnv(t)
 	e.run(t, nil, "--hub", e.srv.URL, "--token", "tok")
-	e.served = []byte("agent-v2")
+	e.serve([]byte("agent-v2"))
 	if out, err := e.run(t, nil, "--hub", e.srv.URL, "--token", "tok"); err != nil {
 		t.Fatalf("%v %s", err, out)
 	}
@@ -148,6 +159,9 @@ func TestInstallShRefuses(t *testing.T) {
 		{"no systemd", map[string]string{"KITE_SYSTEMCTL": "/nonexistent/systemctl"}, []string{"--hub", "http://hub.local:8420", "--token", "t"}, "systemd"},
 		{"not root", map[string]string{"KITE_SKIP_ROOT_CHECK": "0"}, []string{"--hub", "http://hub.local:8420", "--token", "t"}, "root"},
 		{"download fails", nil, []string{"--hub", "http://127.0.0.1:1", "--token", "t"}, "download failed"},
+		{"systemd not running", map[string]string{"KITE_SYSTEMD_DIR": "/nonexistent/systemd"}, []string{"--hub", "http://hub.local:8420", "--token", "t"}, "systemd is not running"},
+		{"name with a space", nil, []string{"--hub", "http://hub.local:8420", "--token", "t", "--name", "Living Room"}, "invalid name"},
+		{"name starting with a dot", nil, []string{"--hub", "http://hub.local:8420", "--token", "t", "--name", ".x"}, "invalid name"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

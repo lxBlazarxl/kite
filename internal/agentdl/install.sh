@@ -5,7 +5,8 @@
 #   curl -fsSL <hub>/install.sh | sudo sh -s -- --uninstall
 #
 # Running it again upgrades the agent. Test hooks: KITE_PREFIX (install
-# under another root), KITE_SYSTEMCTL, KITE_ARCH, KITE_SKIP_ROOT_CHECK=1.
+# under another root), KITE_SYSTEMCTL, KITE_SYSTEMD_DIR, KITE_ARCH,
+# KITE_SKIP_ROOT_CHECK=1.
 set -eu
 
 PREFIX=${KITE_PREFIX:-}
@@ -62,6 +63,9 @@ if [ "${KITE_SKIP_ROOT_CHECK:-}" != 1 ] && [ "$(id -u)" != 0 ]; then
 	die "run as root (for example with sudo)"
 fi
 command -v "$SYSTEMCTL" >/dev/null 2>&1 || die "systemd is required (systemctl not found)"
+# systemctl can exist without systemd running (WSL, containers, other init
+# systems); /run/systemd/system only exists when systemd is PID 1.
+[ -d "${KITE_SYSTEMD_DIR:-/run/systemd/system}" ] || die "systemd is not running on this machine; run kite-agent another way (see the README)"
 
 if [ -n "$uninstall" ]; then
 	"$SYSTEMCTL" disable --now kite-agent >/dev/null 2>&1 || true
@@ -74,6 +78,14 @@ fi
 
 [ -n "$hub" ] || die "--hub is required"
 [ -n "$token" ] || die "--token is required"
+# Same rule the agent enforces, checked here so a bad name fails before
+# anything is installed instead of crash-looping the service.
+if [ -n "$name" ]; then
+	case $name in
+	[!A-Za-z0-9]* | *[!A-Za-z0-9._-]*) die "invalid name '$name': use letters, digits, '.', '_' or '-', starting with a letter or digit" ;;
+	esac
+	[ ${#name} -le 64 ] || die "invalid name: at most 64 characters"
+fi
 hub=${hub%/}
 
 machine=${KITE_ARCH:-$(uname -m)}
