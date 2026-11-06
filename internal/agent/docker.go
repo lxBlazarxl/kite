@@ -244,3 +244,33 @@ func (l *lazyDocker) Collect(ctx context.Context, s *protocol.Sample) error {
 	}
 	return err
 }
+
+type backgroundDocker struct {
+	cache *cached[*protocol.Docker]
+}
+
+// newBackgroundDocker refreshes Docker every period in the background and
+// adds the latest result to each sample. Docker Desktop answers through a
+// VM and takes tens of milliseconds, so on Windows samples must not wait
+// for it. A refresh that finds nothing (Docker quit) clears the section.
+func newBackgroundDocker(inner Collector, every time.Duration) Collector {
+	fetch := func() (*protocol.Docker, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		s := &protocol.Sample{Time: time.Now()}
+		if err := inner.Collect(ctx, s); err != nil {
+			return nil, nil // show no section rather than stale containers
+		}
+		return s.Docker, nil
+	}
+	return &backgroundDocker{cache: newAsyncCached(every, fetch)}
+}
+
+func (b *backgroundDocker) Name() string { return "docker" }
+
+func (b *backgroundDocker) Collect(_ context.Context, s *protocol.Sample) error {
+	if d, ok := b.cache.get(s.Time); ok && d != nil {
+		s.Docker = d
+	}
+	return nil
+}

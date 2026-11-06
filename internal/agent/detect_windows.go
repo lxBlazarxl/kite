@@ -21,6 +21,7 @@ func Detect(cfg Config) []Collector {
 	if c, ok := NewDocker(cfg.DockerHost); ok {
 		if path, isPipe := npipePath(cfg.DockerHost); isPipe {
 			c = newLazyDocker(c, func() bool { return pipeExists(path) }, 60*time.Second, time.Now)
+			c = newBackgroundDocker(c, 15*time.Second)
 		}
 		cols = append(cols, c)
 	}

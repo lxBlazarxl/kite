@@ -199,3 +199,51 @@ func TestLazyDockerAppearsAndDisappears(t *testing.T) {
 		t.Fatalf("called while known absent: %d", inner.calls)
 	}
 }
+
+type slowDocker struct{ delay time.Duration }
+
+func (slowDocker) Name() string { return "docker" }
+func (d slowDocker) Collect(_ context.Context, s *protocol.Sample) error {
+	time.Sleep(d.delay)
+	s.Docker = &protocol.Docker{Containers: []protocol.Container{{Name: "web", State: "running"}}}
+	return nil
+}
+
+func TestBackgroundDockerNeverBlocks(t *testing.T) {
+	c := newBackgroundDocker(slowDocker{200 * time.Millisecond}, 15*time.Second)
+	start := time.Now()
+	s := &protocol.Sample{Time: time.Now()}
+	if err := c.Collect(context.Background(), s); err != nil || s.Docker != nil {
+		t.Fatalf("first sample: err %v docker %v", err, s.Docker)
+	}
+	if time.Since(start) > 20*time.Millisecond {
+		t.Fatal("blocked on the docker daemon")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s = &protocol.Sample{Time: time.Now()}
+		c.Collect(context.Background(), s)
+		if s.Docker != nil && s.Docker.Containers[0].Name == "web" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("docker data never arrived")
+}
+
+type goneDocker struct{}
+
+func (goneDocker) Name() string                                    { return "docker" }
+func (goneDocker) Collect(context.Context, *protocol.Sample) error { return nil }
+
+func TestBackgroundDockerClearsWhenGone(t *testing.T) {
+	c := newBackgroundDocker(goneDocker{}, time.Millisecond)
+	for i := 0; i < 50; i++ {
+		s := &protocol.Sample{Time: time.Now()}
+		c.Collect(context.Background(), s)
+		if s.Docker != nil {
+			t.Fatal("no docker data must give no docker section")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
