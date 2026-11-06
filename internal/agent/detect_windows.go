@@ -1,5 +1,7 @@
 package agent
 
+import "time"
+
 // Detect returns the collectors available on this machine, in sample order.
 func Detect(cfg Config) []Collector {
 	cols := []Collector{NewHost(), NewCPU()}
@@ -14,6 +16,12 @@ func Detect(cfg Config) []Collector {
 		cols = append(cols, c)
 	}
 	if c, ok := NewWindowsGPU(); ok {
+		cols = append(cols, c)
+	}
+	if c, ok := NewDocker(cfg.DockerHost); ok {
+		if path, isPipe := npipePath(cfg.DockerHost); isPipe {
+			c = newLazyDocker(c, func() bool { return pipeExists(path) }, 60*time.Second, time.Now)
+		}
 		cols = append(cols, c)
 	}
 	return cols

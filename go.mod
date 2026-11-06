@@ -3,6 +3,7 @@ module github.com/retransmit/kite
 go 1.26.0
 
 require (
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/shirou/gopsutil/v4 v4.26.10
 	github.com/yusufpapurcu/wmi v1.2.4
 	golang.org/x/sys v0.49.0
