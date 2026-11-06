@@ -29,3 +29,16 @@ func TestKelvinTenthsToC(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestBatteryStateFromPowerStatus(t *testing.T) {
+	p := func(v float64) *float64 { return &v }
+	if got := batteryState(PowerStatus{HasBattery: true, OnAC: false, Percent: p(80)}); got != "discharging" {
+		t.Errorf("unplugged: %q", got)
+	}
+	if got := batteryState(PowerStatus{HasBattery: true, OnAC: true, Percent: p(100)}); got != "full" {
+		t.Errorf("full: %q", got)
+	}
+	if got := batteryState(PowerStatus{HasBattery: true, OnAC: true, Percent: p(57)}); got != "charging" {
+		t.Errorf("charging: %q", got)
+	}
+}

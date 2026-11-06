@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -39,7 +40,8 @@ func TestNewWindowsGPUWithoutNVML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := newWindowsGPU(orderAdapters(adapters), nil, readPowerStatus, nvidiaAwake)
+	noNVML := func() (nvmlReader, error) { return nil, errors.New("nvml.dll: not found") }
+	c, err := newWindowsGPU(orderAdapters(adapters), noNVML, readPowerStatus, nvidiaAwake)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,5 +54,39 @@ func TestNewWindowsGPUWithoutNVML(t *testing.T) {
 	case "on battery", "asleep", "nvml.dll not available":
 	default:
 		t.Fatalf("unexpected unavailable %q", s.Unavailable["gpu.nvidia"])
+	}
+}
+
+type fakeNVML struct{ reads int }
+
+func (f *fakeNVML) read() ([]NVMLReading, error) {
+	f.reads++
+	return []NVMLReading{{TempC: f64p(55)}}, nil
+}
+
+func TestNVMLLoadedOnlyWhenGateOpens(t *testing.T) {
+	adapters, err := enumAdapters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	loads := 0
+	fake := &fakeNVML{}
+	load := func() (nvmlReader, error) { loads++; return fake, nil }
+	onAC := false
+	power := func() (PowerStatus, error) { return PowerStatus{HasBattery: true, OnAC: onAC}, nil }
+	awake := func() (bool, error) { return true, nil }
+	c, err := newWindowsGPU(orderAdapters(adapters), load, power, awake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := collectGPU(t, c)
+	if loads != 0 || s.Unavailable["gpu.nvidia"] != "on battery" {
+		t.Fatalf("on battery: loads %d unavailable %v", loads, s.Unavailable)
+	}
+	onAC = true
+	s = collectGPU(t, c)
+	collectGPU(t, c)
+	if loads != 1 || fake.reads != 2 || s.GPUs[1].TempC == nil || *s.GPUs[1].TempC != 55 {
+		t.Fatalf("on AC: loads %d reads %d gpu %+v", loads, fake.reads, s.GPUs[1])
 	}
 }

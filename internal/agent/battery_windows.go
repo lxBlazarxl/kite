@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/retransmit/kite/internal/protocol"
@@ -26,7 +27,9 @@ func NewWindowsBattery() (Collector, bool) {
 }
 
 func newWindowsBattery(readPower func() (PowerStatus, error), fetch func() (wmiBatteryStatus, error)) *windowsBattery {
-	return &windowsBattery{readPower: readPower, wmi: newAsyncCached(wmiEvery, fetch)}
+	c := newAsyncCached(wmiEvery, fetch)
+	c.maxAge = 3 * wmiEvery
+	return &windowsBattery{readPower: readPower, wmi: c}
 }
 
 func queryBatteryStatus() (wmiBatteryStatus, error) {
@@ -51,19 +54,18 @@ func (b *windowsBattery) Collect(_ context.Context, s *protocol.Sample) error {
 	if !ps.HasBattery || ps.Percent == nil {
 		return nil
 	}
-	bat := &protocol.Battery{Percent: *ps.Percent}
+	bat := &protocol.Battery{Percent: *ps.Percent, State: batteryState(ps)}
 	if st, ok := b.wmi.get(s.Time); ok {
-		state, w := batteryFromWMI(st)
-		bat.State, bat.Watts = state, &w
-	} else {
-		switch {
-		case !ps.OnAC:
-			bat.State = "discharging"
-		case *ps.Percent >= 100:
-			bat.State = "full"
-		default:
-			bat.State = "charging"
+		// WMI only supplies the rate; its sign follows the current state.
+		_, w := batteryFromWMI(st)
+		w = math.Abs(w)
+		switch bat.State {
+		case "discharging":
+			w = -w
+		case "full":
+			w = 0
 		}
+		bat.Watts = &w
 	}
 	s.Battery = bat
 	return nil

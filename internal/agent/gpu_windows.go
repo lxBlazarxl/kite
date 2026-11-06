@@ -17,10 +17,21 @@ const (
 	pathGPUVRAMUsed = `\GPU Adapter Memory(*)\Dedicated Usage`
 )
 
+// nvmlReader is the part of NVML the collector uses (a fake in tests).
+type nvmlReader interface {
+	read() ([]NVMLReading, error)
+}
+
+// nvmlRetry is how long to wait before trying to load NVML again after a
+// failure (for example the driver not ready yet early in boot).
+const nvmlRetry = time.Minute
+
 type windowsGPU struct {
 	adapters  []Adapter
 	q         *pdhQuery
-	nvml      *nvmlLib
+	load      func() (nvmlReader, error)
+	nvml      nvmlReader
+	nvmlTried time.Time
 	hasNvidia bool
 	readPower func() (PowerStatus, error)
 	awake     func() (bool, error)
@@ -42,26 +53,28 @@ func NewWindowsGPU() (Collector, bool) {
 	if len(adapters) == 0 {
 		return nil, false
 	}
-	var nv *nvmlLib
-	for _, a := range adapters {
-		if a.VendorID == vendorNVIDIA {
-			nv, _ = loadNVML() // missing driver is fine: usage still comes from PDH
-			break
+	// NVML is loaded lazily, only once on AC with the GPU awake: its init
+	// touches the device, and the library costs about 22 MB.
+	load := func() (nvmlReader, error) {
+		n, err := loadNVML()
+		if err != nil {
+			return nil, err
 		}
+		return n, nil
 	}
-	c, err := newWindowsGPU(adapters, nv, readPowerStatus, nvidiaAwake)
+	c, err := newWindowsGPU(adapters, load, readPowerStatus, nvidiaAwake)
 	if err != nil {
 		return nil, false
 	}
 	return c, true
 }
 
-func newWindowsGPU(adapters []Adapter, nv *nvmlLib, readPower func() (PowerStatus, error), awake func() (bool, error)) (*windowsGPU, error) {
+func newWindowsGPU(adapters []Adapter, load func() (nvmlReader, error), readPower func() (PowerStatus, error), awake func() (bool, error)) (*windowsGPU, error) {
 	q, err := newPDHQuery(pathGPU3DUtil, pathGPUVRAMUsed)
 	if err != nil {
 		return nil, err
 	}
-	c := &windowsGPU{adapters: adapters, q: q, nvml: nv, readPower: readPower, awake: awake}
+	c := &windowsGPU{adapters: adapters, q: q, load: load, readPower: readPower, awake: awake}
 	for _, a := range adapters {
 		if a.VendorID == vendorNVIDIA {
 			c.hasNvidia = true
@@ -82,7 +95,7 @@ func (c *windowsGPU) Collect(_ context.Context, s *protocol.Sample) error {
 	}
 	gpus := buildGPUs(c.adapters, c.util, c.vram)
 	if c.hasNvidia {
-		if why := c.nvidiaSkipReason(); why != "" {
+		if why := c.nvidiaSkipReason(s.Time); why != "" {
 			setUnavailable(s, "gpu.nvidia", why)
 		} else if rs, err := c.nvml.read(); err != nil {
 			setUnavailable(s, "gpu.nvidia", err.Error())
@@ -94,7 +107,7 @@ func (c *windowsGPU) Collect(_ context.Context, s *protocol.Sample) error {
 	return nil
 }
 
-func (c *windowsGPU) nvidiaSkipReason() string {
+func (c *windowsGPU) nvidiaSkipReason(now time.Time) string {
 	ps, err := c.readPower()
 	gate := nvmlGate{OnAC: err != nil || ps.OnAC}
 	if awake, err := c.awake(); err == nil {
@@ -102,6 +115,10 @@ func (c *windowsGPU) nvidiaSkipReason() string {
 	}
 	if why := nvmlSkipReason(gate); why != "" {
 		return why
+	}
+	if c.nvml == nil && (c.nvmlTried.IsZero() || now.Sub(c.nvmlTried) >= nvmlRetry) {
+		c.nvmlTried = now
+		c.nvml, _ = c.load() // missing driver is fine: usage still comes from PDH
 	}
 	if c.nvml == nil {
 		return "nvml.dll not available"

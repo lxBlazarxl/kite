@@ -18,11 +18,11 @@ type systemTemp struct{ wmi *cached[float64] }
 // Windows exposes no CPU temperature without vendor drivers), refreshed
 // every 30 s. Shown as "System", never as CPU.
 func NewSystemTemp() (Collector, bool) {
-	c := &systemTemp{wmi: newAsyncCached(wmiEvery, queryThermalZone)}
-	if _, err := queryThermalZone(); err != nil {
-		return nil, false
-	}
-	return c, true
+	// No probe here: early in boot WMI may not be ready, so the first
+	// background refresh (and later ones) decide whether a value appears.
+	c := newAsyncCached(wmiEvery, queryThermalZone)
+	c.maxAge = 3 * wmiEvery
+	return &systemTemp{wmi: c}, true
 }
 
 func queryThermalZone() (float64, error) {

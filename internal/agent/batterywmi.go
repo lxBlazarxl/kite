@@ -27,3 +27,15 @@ func batteryFromWMI(b wmiBatteryStatus) (state string, watts float64) {
 func kelvinTenthsToC(v uint32) float64 {
 	return float64(v)/10 - 273.15
 }
+
+// batteryState comes from the cheap kernel power status, which is always
+// current, rather than from WMI, which can lag or go stale.
+func batteryState(ps PowerStatus) string {
+	switch {
+	case !ps.OnAC:
+		return "discharging"
+	case ps.Percent != nil && *ps.Percent >= 100:
+		return "full"
+	}
+	return "charging"
+}

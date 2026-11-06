@@ -65,3 +65,9 @@ func collectUntil(t *testing.T, c Collector, done func(*protocol.Sample) bool) *
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestNewSystemTempAlwaysDetected(t *testing.T) {
+	if _, ok := NewSystemTemp(); !ok {
+		t.Fatal("thermal must be detected without a synchronous probe (retried lazily)")
+	}
+}

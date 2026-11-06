@@ -13,9 +13,13 @@ type cached[T any] struct {
 	every time.Duration
 	fetch func() (T, error)
 	async bool
+	// maxAge, when set, stops serving a value this old (WMI failing or
+	// hanging) so stale readings disappear instead of showing forever.
+	maxAge time.Duration
 
 	mu       sync.Mutex
 	tried    time.Time
+	gotAt    time.Time
 	inFlight bool
 	value    T
 	hasValue bool
@@ -38,22 +42,26 @@ func (c *cached[T]) get(now time.Time) (T, bool) {
 		c.tried = now
 		if c.async {
 			c.inFlight = true
-			go c.refresh()
+			go c.refresh(now)
 		} else {
 			if v, err := c.fetch(); err == nil {
-				c.value, c.hasValue = v, true
+				c.value, c.hasValue, c.gotAt = v, true, now
 			}
 		}
+	}
+	if c.hasValue && c.maxAge > 0 && now.Sub(c.gotAt) > c.maxAge {
+		var zero T
+		return zero, false
 	}
 	return c.value, c.hasValue
 }
 
-func (c *cached[T]) refresh() {
+func (c *cached[T]) refresh(started time.Time) {
 	v, err := c.fetch()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.inFlight = false
 	if err == nil {
-		c.value, c.hasValue = v, true
+		c.value, c.hasValue, c.gotAt = v, true, started
 	}
 }

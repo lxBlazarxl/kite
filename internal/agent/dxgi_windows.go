@@ -39,6 +39,12 @@ type dxgiAdapterDesc1 struct {
 type comObject struct{ vtbl *[32]uintptr }
 
 // comCall invokes method index i of the COM object obj.
+//
+// uintptrescapes makes pointers converted to uintptr in the arguments of a
+// call stay on the heap and alive until comCall returns, as x/sys does for
+// windows.Proc.Call.
+//
+//go:uintptrescapes
 func comCall(obj *comObject, i int, args ...uintptr) uintptr {
 	r, _, _ := syscall.SyscallN(obj.vtbl[i], append([]uintptr{uintptr(unsafe.Pointer(obj))}, args...)...)
 	return r
@@ -47,24 +53,29 @@ func comCall(obj *comObject, i int, args ...uintptr) uintptr {
 // enumAdapters lists display adapters once (at startup) with their LUIDs,
 // which key the GPU performance counters.
 func enumAdapters() ([]Adapter, error) {
-	var factory *comObject
-	if r, _, _ := procCreateDXGIFactory1.Call(uintptr(unsafe.Pointer(&iidIDXGIFactory1)), uintptr(unsafe.Pointer(&factory))); r != 0 {
+	factoryPtr := new(*comObject)
+	if r, _, _ := procCreateDXGIFactory1.Call(uintptr(unsafe.Pointer(&iidIDXGIFactory1)), uintptr(unsafe.Pointer(factoryPtr))); r != 0 {
 		return nil, fmt.Errorf("CreateDXGIFactory1: 0x%08x", uint32(r))
 	}
+	factory := *factoryPtr
 	defer comCall(factory, vtblRelease)
 
 	var out []Adapter
 	for i := uintptr(0); ; i++ {
-		var adapter *comObject
-		r := comCall(factory, vtblEnumAdapters1, i, uintptr(unsafe.Pointer(&adapter)))
+		// Heap-allocate everything DXGI writes into: comCall passes these as
+		// uintptrs, and a stack value could move if the goroutine stack grows
+		// before the call returns.
+		adapterPtr := new(*comObject)
+		r := comCall(factory, vtblEnumAdapters1, i, uintptr(unsafe.Pointer(adapterPtr)))
+		adapter := *adapterPtr
 		if uint32(r) == dxgiErrorNotFound {
 			break
 		}
 		if r != 0 {
 			return out, fmt.Errorf("EnumAdapters1(%d): 0x%08x", i, uint32(r))
 		}
-		var d dxgiAdapterDesc1
-		r = comCall(adapter, vtblAdapterGetDesc1, uintptr(unsafe.Pointer(&d)))
+		d := new(dxgiAdapterDesc1)
+		r = comCall(adapter, vtblAdapterGetDesc1, uintptr(unsafe.Pointer(d)))
 		comCall(adapter, vtblRelease)
 		if r != 0 {
 			continue
