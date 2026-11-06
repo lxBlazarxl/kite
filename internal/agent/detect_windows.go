@@ -7,6 +7,12 @@ func Detect(cfg Config) []Collector {
 		cols = append(cols, c)
 	}
 	cols = append(cols, NewMemory(), NewDisk(), NewNet(cfg.NetInclude, cfg.NetExclude))
+	if c, ok := NewWindowsBattery(); ok {
+		cols = append(cols, c)
+	}
+	if c, ok := NewSystemTemp(); ok {
+		cols = append(cols, c)
+	}
 	if c, ok := NewWindowsGPU(); ok {
 		cols = append(cols, c)
 	}
