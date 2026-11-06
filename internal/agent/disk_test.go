@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -30,6 +31,9 @@ func TestSelectPartitions(t *testing.T) {
 }
 
 func TestDiskReal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows mounts are drive letters; see TestDiskRealWindows")
+	}
 	cfg := Config{Name: "pc", Interval: time.Second, Root: "/"}
 	cols := []Collector{NewDisk()}
 	CollectOnce(context.Background(), cfg, cols, time.Now())

@@ -11,8 +11,14 @@ func TestReadPowerStatusReal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ps.HasBattery || ps.Percent == nil {
-		t.Fatalf("laptop battery not seen: %+v", ps)
+	if !ps.HasBattery {
+		if !ps.OnAC || ps.Percent != nil {
+			t.Fatalf("no battery must mean on AC without a percentage: %+v", ps)
+		}
+		t.Skip("no battery on this machine")
+	}
+	if ps.Percent == nil {
+		t.Fatalf("battery without a percentage: %+v", ps)
 	}
 	t.Logf("on AC %v, %.0f%%", ps.OnAC, *ps.Percent)
 }

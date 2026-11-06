@@ -12,8 +12,13 @@ func TestEnumAdaptersReal(t *testing.T) {
 	}
 	as := orderAdapters(raw)
 	t.Logf("raw %+v\nordered %+v", raw, as)
-	if len(as) != 2 || as[0].VendorID != 0x1002 || as[1].VendorID != 0x10DE {
-		t.Fatalf("want AMD then NVIDIA, got %+v", as)
+	if len(as) == 0 {
+		t.Fatal("no usable display adapter")
+	}
+	for i := 1; i < len(as); i++ {
+		if vendorRank(as[i-1].VendorID) > vendorRank(as[i].VendorID) {
+			t.Fatalf("adapters not ordered AMD, NVIDIA, others: %+v", as)
+		}
 	}
 	q, err := newPDHQuery(`\GPU Adapter Memory(*)\Dedicated Usage`)
 	if err != nil {

@@ -10,6 +10,9 @@ import (
 )
 
 func TestBatteryWithoutWMI(t *testing.T) {
+	if ps, _ := readPowerStatus(); !ps.HasBattery {
+		t.Skip("no battery on this machine")
+	}
 	c := newWindowsBattery(readPowerStatus, func() (wmiBatteryStatus, error) { return wmiBatteryStatus{}, errors.New("wmi broken") })
 	s := &protocol.Sample{Time: time.Now()}
 	if err := c.Collect(context.Background(), s); err != nil {
@@ -27,7 +30,7 @@ func TestBatteryWithoutWMI(t *testing.T) {
 func TestWindowsBatteryReal(t *testing.T) {
 	c, ok := NewWindowsBattery()
 	if !ok {
-		t.Fatal("not detected")
+		t.Skip("no battery on this machine")
 	}
 	s := collectUntil(t, c, func(s *protocol.Sample) bool { return s.Battery != nil && s.Battery.Watts != nil })
 	b := s.Battery

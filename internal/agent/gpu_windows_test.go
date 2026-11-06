@@ -26,13 +26,18 @@ func TestNewWindowsGPUReal(t *testing.T) {
 	collectGPU(t, c)
 	time.Sleep(time.Second)
 	s := collectGPU(t, c)
-	if len(s.GPUs) != 2 || s.GPUs[0].Vendor != "amd" || s.GPUs[1].Vendor != "nvidia" || s.GPUs[0].UtilPct == nil || s.GPUs[1].UtilPct == nil {
-		t.Fatalf("gpus %+v", s.GPUs)
+	if len(s.GPUs) == 0 {
+		t.Fatal("no GPUs reported")
 	}
-	if s.Unavailable["gpu.nvidia"] == "" && s.GPUs[1].TempC == nil {
-		t.Fatal("nvidia awake on AC but no temperature")
+	for _, g := range s.GPUs {
+		if g.UtilPct == nil {
+			t.Fatalf("gpu without usage: %+v", g)
+		}
+		if g.Vendor == "nvidia" && s.Unavailable["gpu.nvidia"] == "" && g.TempC == nil {
+			t.Fatal("nvidia awake on AC but no temperature")
+		}
 	}
-	t.Logf("amd util %.1f, nvidia util %.1f temp %v, unavailable %v", *s.GPUs[0].UtilPct, *s.GPUs[1].UtilPct, deref(s.GPUs[1].TempC), s.Unavailable)
+	t.Logf("gpus %d, unavailable %v", len(s.GPUs), s.Unavailable)
 }
 
 func TestNewWindowsGPUWithoutNVML(t *testing.T) {
@@ -47,8 +52,16 @@ func TestNewWindowsGPUWithoutNVML(t *testing.T) {
 	}
 	time.Sleep(500 * time.Millisecond)
 	s := collectGPU(t, c)
-	if len(s.GPUs) != 2 || s.GPUs[1].TempC != nil {
-		t.Fatalf("gpus %+v", s.GPUs)
+	if len(s.GPUs) == 0 {
+		t.Fatal("no GPUs reported without NVML")
+	}
+	for _, g := range s.GPUs {
+		if g.TempC != nil {
+			t.Fatalf("temperature without NVML: %+v", g)
+		}
+	}
+	if !hasVendor(s.GPUs, "nvidia") {
+		return
 	}
 	switch s.Unavailable["gpu.nvidia"] {
 	case "on battery", "asleep", "nvml.dll not available":
@@ -69,13 +82,24 @@ func TestNVMLLoadedOnlyWhenGateOpens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	adapters = orderAdapters(adapters)
+	nv := -1
+	for i, a := range adapters {
+		if a.VendorID == vendorNVIDIA {
+			nv = i
+			break
+		}
+	}
+	if nv < 0 {
+		t.Skip("no NVIDIA adapter on this machine")
+	}
 	loads := 0
 	fake := &fakeNVML{}
 	load := func() (nvmlReader, error) { loads++; return fake, nil }
 	onAC := false
 	power := func() (PowerStatus, error) { return PowerStatus{HasBattery: true, OnAC: onAC}, nil }
 	awake := func() (bool, error) { return true, nil }
-	c, err := newWindowsGPU(orderAdapters(adapters), load, power, awake)
+	c, err := newWindowsGPU(adapters, load, power, awake)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +110,16 @@ func TestNVMLLoadedOnlyWhenGateOpens(t *testing.T) {
 	onAC = true
 	s = collectGPU(t, c)
 	collectGPU(t, c)
-	if loads != 1 || fake.reads != 2 || s.GPUs[1].TempC == nil || *s.GPUs[1].TempC != 55 {
-		t.Fatalf("on AC: loads %d reads %d gpu %+v", loads, fake.reads, s.GPUs[1])
+	if loads != 1 || fake.reads != 2 || s.GPUs[nv].TempC == nil || *s.GPUs[nv].TempC != 55 {
+		t.Fatalf("on AC: loads %d reads %d gpu %+v", loads, fake.reads, s.GPUs[nv])
 	}
+}
+
+func hasVendor(gpus []protocol.GPU, vendor string) bool {
+	for _, g := range gpus {
+		if g.Vendor == vendor {
+			return true
+		}
+	}
+	return false
 }

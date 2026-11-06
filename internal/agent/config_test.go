@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -16,8 +17,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	host, _ := os.Hostname()
-	if c.Interval != 5*time.Second || c.Name != host || len(c.NetExclude) != 5 ||
-		c.DockerHost != "unix:///var/run/docker.sock" || c.Root != "/" || !c.Once {
+	if c.Interval != 5*time.Second || c.Name != host || len(c.NetExclude) != len(splitList(defaultNetExclude(runtime.GOOS))) ||
+		c.DockerHost != defaultDockerHost(runtime.GOOS) || c.Root != "/" || !c.Once {
 		t.Fatalf("defaults wrong: %+v", c)
 	}
 }

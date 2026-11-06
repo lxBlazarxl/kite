@@ -24,8 +24,8 @@ func TestNetWindowsReal(t *testing.T) {
 			t.Errorf("should be hidden: %q", n.Name)
 		}
 	}
-	if !names["Ethernet"] || !names["Tailscale"] {
-		t.Fatalf("missing real interfaces: %v", names)
+	if len(names) == 0 {
+		t.Fatal("no network interfaces reported")
 	}
 	const n = 20
 	start := time.Now()

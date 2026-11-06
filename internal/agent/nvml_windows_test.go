@@ -9,18 +9,14 @@ import (
 func TestNVMLReal(t *testing.T) {
 	n, err := loadNVML()
 	if err != nil {
-		t.Fatal(err)
+		t.Skipf("no NVIDIA driver: %v", err)
 	}
 	rs, err := n.read()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rs) != 1 || !strings.Contains(rs[0].Name, "RTX 4060") || rs[0].VRAMTotal == nil {
+	if len(rs) == 0 || !strings.Contains(rs[0].Name, "NVIDIA") || rs[0].VRAMTotal == nil || *rs[0].VRAMTotal == 0 {
 		t.Fatalf("got %+v", rs)
-	}
-	gib := float64(*rs[0].VRAMTotal) / (1 << 30)
-	if gib < 3.8 || gib > 4.2 {
-		t.Fatalf("vram total %.2f GiB", gib)
 	}
 	t.Logf("%s temp %v power %v util %v", rs[0].Name, deref(rs[0].TempC), deref(rs[0].PowerW), deref(rs[0].UtilPct))
 }
