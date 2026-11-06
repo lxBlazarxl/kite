@@ -2,8 +2,10 @@ package web
 
 import (
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -37,5 +39,27 @@ func TestAssetCache(t *testing.T) {
 	}
 	if r := get(t, h, "/nope.js"); r.StatusCode != 404 {
 		t.Fatalf("missing file: %d", r.StatusCode)
+	}
+}
+
+// A fresh checkout (the release workflow) only has committed files, so this
+// fails if a rebuilt page was committed without its new asset files.
+func TestIndexAssetsEmbedded(t *testing.T) {
+	sub, err := fs.Sub(dist, "dist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := regexp.MustCompile(`assets/[^"']+`).FindAllString(string(index), -1)
+	if len(refs) == 0 {
+		t.Fatal("index.html references no assets")
+	}
+	for _, r := range refs {
+		if _, err := fs.Stat(sub, r); err != nil {
+			t.Errorf("index.html references %s, which is not embedded", r)
+		}
 	}
 }

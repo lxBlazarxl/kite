@@ -14,8 +14,8 @@ import (
 
 type shEnv struct {
 	prefix, log, systemctl string
-	served             []byte
-	srv                *httptest.Server
+	served                 []byte
+	srv                    *httptest.Server
 }
 
 func newShEnv(t *testing.T) *shEnv {
