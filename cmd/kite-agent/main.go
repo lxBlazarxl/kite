@@ -20,6 +20,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "kite-agent:", err)
 		os.Exit(2)
 	}
+	if err := agent.LowerPriority(); err != nil {
+		log.Printf("kite-agent: could not lower priority: %v", err)
+	}
 	cols := agent.Detect(cfg)
 	ctx := context.Background()
 
