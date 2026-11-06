@@ -1,0 +1,16 @@
+# Kite hub image. Build context: dist/ from scripts/release-build.sh.
+# distroless has no shell, so /data is prepared in a small stage first and
+# copied in owned by the image's nonroot user (uid 65532); a new named
+# volume mounted there inherits that ownership.
+FROM busybox:1.36 AS prep
+RUN mkdir /data && chown 65532:65532 /data
+
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETARCH
+COPY --from=prep --chown=65532:65532 /data /data
+COPY kite-hub-linux-${TARGETARCH} /kite-hub
+ENV DB_PATH=/data/kite.db
+VOLUME /data
+EXPOSE 8420
+USER nonroot
+ENTRYPOINT ["/kite-hub"]

@@ -1,4 +1,5 @@
 import { go } from './router'
+import type { InstallInfo } from './install'
 import type { MachineInfo, Resolution, SeriesResponse, SessionInfo } from './types'
 
 const MAX_KEYS = 64 // hub limit per series request
@@ -24,6 +25,9 @@ const enc = encodeURIComponent
 export const api = {
   async session(): Promise<SessionInfo> {
     return (await req('api/v1/session', {}, false)).json()
+  },
+  async installInfo(): Promise<InstallInfo> {
+    return (await req('api/v1/install-info')).json()
   },
   async getMachines(): Promise<MachineInfo[]> {
     return (await req('api/v1/machines')).json()

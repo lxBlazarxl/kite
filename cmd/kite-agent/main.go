@@ -12,9 +12,14 @@ import (
 	"time"
 
 	"github.com/retransmit/kite/internal/agent"
+	"github.com/retransmit/kite/internal/version"
 )
 
 func main() {
+	if len(os.Args) == 2 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println("kite-agent", version.Version)
+		return
+	}
 	if len(os.Args) > 1 {
 		var err error
 		handled := true

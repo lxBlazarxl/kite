@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/retransmit/kite/internal/protocol"
+	"github.com/retransmit/kite/internal/version"
 )
 
 // Collector fills one part of a sample. Collectors must use s.Time as the
@@ -40,12 +41,13 @@ func CollectOnce(ctx context.Context, cfg Config, cols []Collector, now time.Tim
 func CollectTimed(ctx context.Context, cfg Config, cols []Collector, now time.Time) (*protocol.Sample, []CollectorTiming) {
 	host, _ := os.Hostname()
 	s := &protocol.Sample{
-		Version:     protocol.Version,
-		Machine:     cfg.Name,
-		OS:          runtime.GOOS,
-		Hostname:    host,
-		Time:        now,
-		IntervalSec: cfg.Interval.Seconds(),
+		Version:      protocol.Version,
+		Machine:      cfg.Name,
+		OS:           runtime.GOOS,
+		Hostname:     host,
+		Time:         now,
+		IntervalSec:  cfg.Interval.Seconds(),
+		AgentVersion: version.Version,
 	}
 	timings := make([]CollectorTiming, 0, len(cols))
 	for _, c := range cols {

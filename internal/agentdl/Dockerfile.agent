@@ -1,0 +1,7 @@
+# Kite agent image. The build context holds the Linux agent binaries; the
+# hub serves this file and them at /docker/agent.tar, and the release
+# workflow builds the published image from the same file.
+FROM gcr.io/distroless/static-debian12
+ARG TARGETARCH
+COPY kite-agent-linux-${TARGETARCH} /kite-agent
+ENTRYPOINT ["/kite-agent"]

@@ -71,6 +71,7 @@ export interface Sample {
   interval_sec: number
   uptime_sec?: number
   platform?: string
+  agent_version?: string
   /** Motherboard/ACPI sensor, reported where no CPU sensor exists (Windows). */
   system_temp_c?: number
   cpu?: CPU
@@ -114,4 +115,5 @@ export type StatusFrame = { name: string; online: boolean }[]
 export interface SessionInfo {
   password_required: boolean
   logged_in: boolean
+  version?: string
 }

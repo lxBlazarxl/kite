@@ -23,7 +23,10 @@ type Config struct {
 	NetExclude []string
 	DockerHost string
 	Root       string
-	Once       bool
+	// HostRoot is where the host's / is mounted when the agent runs in a
+	// container (KITE_HOST_ROOT); empty otherwise.
+	HostRoot string
+	Once     bool
 	// DebugTiming logs how long each collector takes, once per sample.
 	DebugTiming bool
 }
@@ -37,7 +40,14 @@ func LoadConfig(args []string, getenv func(string) string) (Config, error) {
 		return def
 	}
 	host, _ := os.Hostname()
-	c := Config{Root: "/"}
+	c := Config{Root: "/", HostRoot: getenv("KITE_HOST_ROOT")}
+	if c.HostRoot != "" {
+		c.Root = c.HostRoot
+		applyHostRoot(c.HostRoot, os.Getenv, os.Setenv)
+		if h := hostHostname(c.HostRoot); h != "" {
+			host = h
+		}
+	}
 	interval := or("INTERVAL", "5s")
 
 	fs := flag.NewFlagSet("kite-agent", flag.ContinueOnError)

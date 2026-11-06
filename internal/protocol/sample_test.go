@@ -100,3 +100,9 @@ func TestFlattenSystemTemp(t *testing.T) {
 		t.Fatalf("got %v", pts)
 	}
 }
+
+func TestFlattenIgnoresAgentVersion(t *testing.T) {
+	if n := len(Flatten(&Sample{AgentVersion: "v1"})); n != 0 {
+		t.Fatalf("agent version must not become a series, got %d points", n)
+	}
+}

@@ -1,0 +1,33 @@
+# Kite hub, plus an optional agent for the hub's own machine.
+#
+#   cp .env.example .env    # then set AGENT_TOKEN (and WEB_PASSWORD if you like)
+#   docker compose up -d                   # hub only
+#   docker compose --profile agent up -d   # hub and an agent for this machine
+#
+# While the repository is private, log in once: docker login ghcr.io
+services:
+  hub:
+    image: ghcr.io/retransmit/kite-hub:${KITE_VERSION:-latest}
+    ports:
+      - "8420:8420"
+    env_file: .env
+    volumes:
+      - kite-data:/data
+    restart: unless-stopped
+
+  agent:
+    profiles: ["agent"]
+    image: ghcr.io/retransmit/kite-agent:${KITE_VERSION:-latest}
+    network_mode: host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      KITE_HOST_ROOT: /host
+      HUB_URL: http://127.0.0.1:8420
+      AGENT_TOKEN: ${AGENT_TOKEN:?set AGENT_TOKEN in .env}
+    restart: unless-stopped
+
+volumes:
+  kite-data:
