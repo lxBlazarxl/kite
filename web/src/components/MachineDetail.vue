@@ -162,7 +162,8 @@ async function remove() {
       <h1>{{ name }}</h1>
       <span v-if="latest" class="muted info">
         {{ platformLabel(latest) }}<template v-if="latest.cpu?.model"> · {{ latest.cpu.model }}</template
-        ><template v-if="latest.uptime_sec"> · up {{ formatUptime(latest.uptime_sec) }}</template>
+        ><template v-if="latest.uptime_sec"> · up {{ formatUptime(latest.uptime_sec) }}</template
+        ><template v-if="latest.agent_version"> · agent {{ latest.agent_version }}</template>
       </span>
       <span v-if="range === 'live'" class="live">● LIVE</span>
       <nav class="seg">

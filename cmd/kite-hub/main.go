@@ -15,9 +15,14 @@ import (
 	"time"
 
 	"github.com/retransmit/kite/internal/hub"
+	"github.com/retransmit/kite/internal/version"
 )
 
 func main() {
+	if len(os.Args) == 2 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println("kite-hub", version.Version)
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "remove-machine" {
 		os.Exit(removeMachine(os.Args[2:]))
 	}

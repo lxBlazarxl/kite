@@ -141,3 +141,14 @@ func TestSessionInfo(t *testing.T) {
 		t.Fatalf("logged in: %v %v", req, in)
 	}
 }
+
+func TestSessionIncludesVersion(t *testing.T) {
+	h := newTestHub(t, nil)
+	var v struct {
+		Version string `json:"version"`
+	}
+	decode(t, h.do("GET", "/api/v1/session", "", nil), &v)
+	if v.Version != "dev" {
+		t.Fatalf("got %q", v.Version)
+	}
+}

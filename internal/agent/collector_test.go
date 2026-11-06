@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/retransmit/kite/internal/protocol"
+	"github.com/retransmit/kite/internal/version"
 )
 
 type fakeCollector struct {
@@ -87,5 +88,12 @@ func TestCollectTimed(t *testing.T) {
 	_, timings := CollectTimed(context.Background(), Config{Name: "pc", Interval: 5 * time.Second}, cols, time.Now())
 	if len(timings) != 2 || timings[0].Name != "fast" || timings[1].Name != "slow" || timings[1].Took < 20*time.Millisecond {
 		t.Fatalf("got %+v", timings)
+	}
+}
+
+func TestCollectSetsAgentVersion(t *testing.T) {
+	s := CollectOnce(context.Background(), Config{Name: "pc", Interval: 5 * time.Second}, nil, time.Now())
+	if s.AgentVersion != version.Version {
+		t.Fatalf("got %q", s.AgentVersion)
 	}
 }

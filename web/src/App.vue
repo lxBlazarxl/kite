@@ -93,6 +93,7 @@ const counts = computed(() => {
   <footer v-if="route.name !== 'login'" class="foot muted">
     <span>{{ counts.total }} machines · {{ counts.online }} online</span>
     <span v-if="store.lastUpdate"> · updated {{ formatAgo(nowSec - store.lastUpdate) }}</span>
+    <span v-if="store.session?.version"> · hub {{ store.session.version }}</span>
     <a v-if="store.session?.password_required" href="#" class="logout" @click.prevent="logout">Log out</a>
   </footer>
 </template>

@@ -15,24 +15,25 @@ const Version = 1
 // Optional values are pointers: nil means the agent could not read them,
 // which is different from a reading of zero.
 type Sample struct {
-	Version     int               `json:"v"`
-	Machine     string            `json:"machine"`
-	OS          string            `json:"os"`
-	Hostname    string            `json:"hostname"`
-	Time        time.Time         `json:"time"`
-	IntervalSec float64           `json:"interval_sec"`
-	UptimeSec   uint64            `json:"uptime_sec,omitempty"`
-	Platform    string            `json:"platform,omitempty"`      // distro or Windows edition, e.g. "arch"
-	SystemTempC *float64          `json:"system_temp_c,omitempty"` // motherboard/ACPI sensor where no CPU sensor exists (Windows)
-	CPU         *CPU              `json:"cpu,omitempty"`
-	Memory      *Memory           `json:"memory,omitempty"`
-	GPUs        []GPU             `json:"gpus,omitempty"`
-	Power       *Power            `json:"power,omitempty"`
-	Battery     *Battery          `json:"battery,omitempty"`
-	Disks       []Disk            `json:"disks,omitempty"`
-	Net         []NetIf           `json:"net,omitempty"`
-	Docker      *Docker           `json:"docker,omitempty"`
-	Unavailable map[string]string `json:"unavailable,omitempty"`
+	Version      int               `json:"v"`
+	Machine      string            `json:"machine"`
+	OS           string            `json:"os"`
+	Hostname     string            `json:"hostname"`
+	Time         time.Time         `json:"time"`
+	IntervalSec  float64           `json:"interval_sec"`
+	UptimeSec    uint64            `json:"uptime_sec,omitempty"`
+	Platform     string            `json:"platform,omitempty"` // distro or Windows edition, e.g. "arch"
+	AgentVersion string            `json:"agent_version,omitempty"`
+	SystemTempC  *float64          `json:"system_temp_c,omitempty"` // motherboard/ACPI sensor where no CPU sensor exists (Windows)
+	CPU          *CPU              `json:"cpu,omitempty"`
+	Memory       *Memory           `json:"memory,omitempty"`
+	GPUs         []GPU             `json:"gpus,omitempty"`
+	Power        *Power            `json:"power,omitempty"`
+	Battery      *Battery          `json:"battery,omitempty"`
+	Disks        []Disk            `json:"disks,omitempty"`
+	Net          []NetIf           `json:"net,omitempty"`
+	Docker       *Docker           `json:"docker,omitempty"`
+	Unavailable  map[string]string `json:"unavailable,omitempty"`
 }
 
 type CPU struct {

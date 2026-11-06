@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/retransmit/kite/internal/version"
 )
 
 const (
@@ -104,5 +106,5 @@ func (s *Server) handleLogout(w http.ResponseWriter, _ *http.Request) {
 // browser is logged in. It never requires a session itself.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	required := s.cfg.WebPassword != ""
-	writeJSON(w, map[string]bool{"password_required": required, "logged_in": !required || s.validSession(r)})
+	writeJSON(w, map[string]any{"password_required": required, "logged_in": !required || s.validSession(r), "version": version.Version})
 }
