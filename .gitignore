@@ -3,3 +3,5 @@
 *.db-wal
 *.db-shm
 web/node_modules/
+internal/agentdl/bin/kite-agent-*
+dist/

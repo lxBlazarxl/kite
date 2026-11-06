@@ -152,3 +152,23 @@ func TestSessionIncludesVersion(t *testing.T) {
 		t.Fatalf("got %q", v.Version)
 	}
 }
+
+func TestInstallInfo(t *testing.T) {
+	h := newTestHub(t, nil)
+	var v struct {
+		Version   string `json:"version"`
+		Token     string `json:"token"`
+		Downloads bool   `json:"downloads"`
+	}
+	decode(t, h.do("GET", "/api/v1/install-info", "", nil), &v)
+	if v.Token != "tok" || v.Version != "dev" {
+		t.Fatalf("got %+v", v)
+	}
+	p := newTestHub(t, withPassword)
+	if r := p.do("GET", "/api/v1/install-info", "", nil); r.StatusCode != 401 {
+		t.Fatalf("install-info without login: %d", r.StatusCode)
+	}
+	if r := p.do("GET", "/install.sh", "", nil); r.StatusCode != 200 {
+		t.Fatalf("install.sh must not need a login: %d", r.StatusCode)
+	}
+}

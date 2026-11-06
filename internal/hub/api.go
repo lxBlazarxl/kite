@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/retransmit/kite/internal/agentdl"
 	"github.com/retransmit/kite/internal/protocol"
+	"github.com/retransmit/kite/internal/version"
 	"github.com/retransmit/kite/internal/web"
 )
 
@@ -61,6 +63,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/machines/{name}", s.requireSession(s.handleDelete))
 	mux.HandleFunc("GET /api/v1/stream", s.requireSession(s.handleStream))
 	mux.HandleFunc("GET /api/v1/session", s.handleSession)
+	mux.HandleFunc("GET /api/v1/install-info", s.requireSession(s.handleInstallInfo))
+	dl := agentdl.Handler()
+	mux.Handle("GET /download/", dl)
+	mux.Handle("GET /install.sh", dl)
+	mux.Handle("GET /install.ps1", dl)
+	mux.Handle("GET /docker/agent.tar", dl)
 	mux.Handle("GET /", web.Handler())
 	return mux
 }
@@ -280,4 +288,10 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleInstallInfo gives the dashboard what it needs for the Add machine
+// commands. It includes the agent token, so it sits behind the session.
+func (s *Server) handleInstallInfo(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, map[string]any{"version": version.Version, "token": s.cfg.AgentToken, "downloads": agentdl.Available()})
 }
