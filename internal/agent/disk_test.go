@@ -60,3 +60,12 @@ func TestIODeviceNameFollowsMapper(t *testing.T) {
 		t.Fatalf("plain device: got %q", got)
 	}
 }
+
+func TestIODeviceNameDriveLetter(t *testing.T) {
+	if got := ioDeviceName("C:"); got != "C:" {
+		t.Errorf("C: -> %q", got)
+	}
+	if got := ioDeviceName(`D:\`); got != "D:" {
+		t.Errorf(`D:\ -> %q`, got)
+	}
+}

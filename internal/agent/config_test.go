@@ -58,3 +58,10 @@ func TestLoadConfigErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfigDebugTiming(t *testing.T) {
+	c, err := LoadConfig([]string{"-once", "-debug-timing"}, env(nil))
+	if err != nil || !c.DebugTiming {
+		t.Fatalf("got %+v %v", c, err)
+	}
+}

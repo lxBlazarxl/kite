@@ -7,7 +7,7 @@ import (
 )
 
 func TestMatchIface(t *testing.T) {
-	ex := splitList(defaultNetExclude)
+	ex := splitList(defaultNetExclude("linux"))
 	for _, n := range []string{"lo", "veth69bb6c5", "br-0ad566af6b5e", "docker0", "virbr0"} {
 		if matchIface(n, nil, ex) {
 			t.Errorf("%s should be hidden", n)
@@ -25,7 +25,7 @@ func TestMatchIface(t *testing.T) {
 
 func TestNetReal(t *testing.T) {
 	cfg := Config{Name: "pc", Interval: time.Second, Root: "/"}
-	cols := []Collector{NewNet(nil, splitList(defaultNetExclude))}
+	cols := []Collector{NewNet(nil, splitList(defaultNetExclude("linux")))}
 	CollectOnce(context.Background(), cfg, cols, time.Now())
 	time.Sleep(200 * time.Millisecond)
 	s := CollectOnce(context.Background(), cfg, cols, time.Now())
