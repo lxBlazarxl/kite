@@ -1,6 +1,6 @@
 import type { SeriesResponse } from './types'
 
-export type Unit = 'pct' | 'bytes' | 'bps' | 'watts' | 'celsius'
+export type Unit = 'pct' | 'bytes' | 'bps' | 'watts' | 'celsius' | 'count'
 
 export interface ChartSpec {
   id: string
@@ -50,6 +50,12 @@ export function chartSpecs(keys: string[]): ChartSpec[] {
     ],
   })
   add({ id: 'battery', title: 'Battery', unit: 'pct', series: pick([['battery.pct', 'charge']]) })
+  add({
+    id: 'services',
+    title: 'Systemd services',
+    unit: 'count',
+    series: pick([['systemd.running', 'running'], ['systemd.failed', 'failed'], ['systemd.total', 'total']]),
+  })
   add({
     id: 'temps',
     title: 'Temperatures',

@@ -25,6 +25,8 @@ let themeObs: MutationObserver | null = null
 const PALETTE = ['--cpu', '--ram', '--gpu', '--c4', '--c5', '--c6']
 // Axis steps in round binary amounts (512 MB, 1 GB) for byte charts.
 const BINARY_INCRS = [0, 1, 2, 3, 4, 5].flatMap((e) => [1, 2, 4, 8, 16, 32, 64, 128, 256, 512].map((m) => m * 1024 ** e))
+// Counts are whole numbers; fractional steps would print duplicate labels.
+const COUNT_INCRS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000]
 
 function css(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -51,6 +53,7 @@ function build() {
     }
   })
   const binary = props.spec.unit === 'bytes' || props.spec.unit === 'bps'
+  const incrs = binary ? BINARY_INCRS : props.spec.unit === 'count' ? COUNT_INCRS : undefined
   const opts: uPlot.Options = {
     width: el.value.clientWidth,
     height: 170,
@@ -63,7 +66,7 @@ function build() {
     },
     axes: [
       { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } },
-      { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: 84, incrs: binary ? BINARY_INCRS : undefined, values: (_u, vals) => vals.map((v) => formatUnit(props.spec.unit, v)) },
+      { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: 84, incrs, values: (_u, vals) => vals.map((v) => formatUnit(props.spec.unit, v)) },
     ],
     hooks: {
       setSelect: [() => (zoomed = true)],

@@ -34,6 +34,39 @@ describe('chartSpecs', () => {
     expect(p.unit).toBe('watts')
     expect(p.series.map((s) => s.key)).toEqual(['power.cpu_w', 'power.platform_w', 'battery.w', 'gpu.1.power_w'])
   })
+
+  it('charts systemd counts', () => {
+    const s = chartSpecs(['systemd.total', 'systemd.running', 'systemd.failed']).find((c) => c.id === 'services')!
+    expect(s.unit).toBe('count')
+    expect(s.series.map((x) => x.key)).toEqual(['systemd.running', 'systemd.failed', 'systemd.total'])
+  })
+
+  // Every key protocol.Flatten can emit must be either charted or listed here
+  // as deliberately shown elsewhere (tables) or not at all. Without this, a
+  // collector can emit keys that no part of the page ever reads.
+  it('every flattenable key is charted or explicitly accounted for', () => {
+    const keys = [
+      'cpu.total', 'cpu.core.0', 'cpu.freq_mhz', 'cpu.temp_c', 'system.temp_c',
+      'mem.total', 'mem.used', 'swap.total', 'swap.used',
+      'gpu.0.util', 'gpu.0.vram_used', 'gpu.0.vram_total', 'gpu.0.temp_c', 'gpu.0.power_w',
+      'power.cpu_w', 'power.platform_w', 'battery.pct', 'battery.w',
+      'disk./.used', 'disk./.total', 'disk./.read_bps', 'disk./.write_bps',
+      'net.eth0.rx_bps', 'net.eth0.tx_bps',
+      'docker.web.running', 'docker.web.cpu_pct', 'docker.web.mem',
+      'systemd.total', 'systemd.running', 'systemd.failed',
+    ]
+    // Shown in a table or the latest sample, never as a chart.
+    const tableOnly = new Set([
+      'cpu.freq_mhz', 'disk./.used', 'disk./.total',
+      'docker.web.running', 'docker.web.cpu_pct', 'docker.web.mem',
+    ])
+    // Flattenable, but no part of the page reads it yet. swap.total is charted
+    // in its own change; keep the gap visible here rather than excusing it.
+    const knownGaps = new Set(['swap.total'])
+    const charted = new Set(chartSpecs(keys).flatMap((c) => c.series.map((s) => s.key)))
+    const unaccounted = keys.filter((k) => !charted.has(k) && !tableOnly.has(k) && !knownGaps.has(k))
+    expect(unaccounted).toEqual([])
+  })
 })
 
 describe('gaps', () => {

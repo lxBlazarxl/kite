@@ -34,3 +34,26 @@ it('flattenSample of an empty sample is empty', () => {
 it('flattenSample mirrors system temperature', () => {
   expect(flattenSample({ ...base, system_temp_c: 51 } as Sample)).toEqual({ 'system.temp_c': 51 })
 })
+
+it('flattenSample emits systemd counts, matching Go TestFlattenSystemdCounts', () => {
+  const s: Sample = {
+    ...base,
+    systemd: {
+      services: [
+        { name: 'a.service', scope: 'system', active_state: 'active', sub_state: 'running' },
+        { name: 'b.service', scope: 'system', active_state: 'active', sub_state: 'exited' },
+        { name: 'c.service', scope: 'user', owner: 'alice', active_state: 'failed', sub_state: 'failed' },
+        { name: 'd.service', scope: 'user', owner: 'alice', active_state: 'inactive', sub_state: 'dead' },
+      ],
+    },
+  }
+  expect(flattenSample(s)).toEqual({ 'systemd.total': 4, 'systemd.running': 1, 'systemd.failed': 1 })
+})
+
+it('flattenSample reports zero systemd counts for an empty list', () => {
+  expect(flattenSample({ ...base, systemd: { services: [] } } as Sample)).toEqual({
+    'systemd.total': 0,
+    'systemd.running': 0,
+    'systemd.failed': 0,
+  })
+})
