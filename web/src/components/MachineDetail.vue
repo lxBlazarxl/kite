@@ -144,6 +144,8 @@ const scopeFilter = ref('')
 const services = computed(() =>
   scopeFilter.value ? svc.value.rows.filter((s) => (s.scope ?? 'system') === scopeFilter.value) : svc.value.rows,
 )
+/** Why the list is missing or partial, as reported by the agent. */
+const servicesNote = computed(() => latest.value?.unavailable?.systemd ?? '')
 const runningServices = computed(() => services.value.filter((s) => s.order === 2).length)
 const failedServices = computed(() => services.value.filter((s) => s.order === 0).length)
 
@@ -212,19 +214,23 @@ async function remove() {
       <DataTable :columns="containerCols" :rows="containers" :dim="(r) => r.state !== 'running'" initial-sort="name" />
     </section>
 
-    <section v-if="services.length" class="panel">
+    <section v-if="services.length || servicesNote" class="panel">
       <h2>
         Services
-        <span class="muted">{{ runningServices }} / {{ services.length }} running</span>
-        <span v-if="failedServices" class="badge crit">{{ failedServices }} failed</span>
-        <span v-else class="muted">· none failed</span>
+        <template v-if="services.length">
+          <span class="muted">{{ runningServices }} / {{ services.length }} running</span>
+          <span v-if="failedServices" class="badge crit">{{ failedServices }} failed</span>
+          <span v-else class="muted">· none failed</span>
+        </template>
         <span v-if="svc.scopes.length > 1" class="filter">
           <button v-for="f in ['', ...svc.scopes]" :key="f" :class="{ act: scopeFilter === f }" @click="scopeFilter = f">
             {{ f === '' ? 'All' : f }}
           </button>
         </span>
       </h2>
+      <p v-if="servicesNote" class="muted note">{{ services.length ? 'Not everything could be read: ' : 'Could not read services: ' }}{{ servicesNote }}</p>
       <DataTable
+        v-if="services.length"
         :columns="serviceCols"
         :rows="services"
         :dim="(r) => r.active_state !== 'active'"
@@ -278,6 +284,7 @@ h2 .filter button.act { background: var(--line); color: var(--text); }
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; }
 .foot { margin: 12px 0 0; text-align: right; }
 .idle { font-size: 12px; margin: 0 0 12px; }
+.note { font-size: 12px; margin: 0 0 8px; overflow-wrap: anywhere; }
 .danger { color: var(--crit); }
 .err { color: var(--crit); }
 .center { text-align: center; padding: 48px 16px; }
