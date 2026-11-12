@@ -4,7 +4,7 @@ import Chart from './Chart.vue'
 import DataTable, { type Column } from './DataTable.vue'
 import { api, HttpError } from '../lib/api'
 import { formatBytes, formatPct, formatRate, formatUnit, formatUptime, platformLabel } from '../lib/format'
-import { livePointFromFrame } from '../lib/overview'
+import { livePointFromFrame, scopeLabel, serviceSummary } from '../lib/overview'
 import { go, machinePath, RANGES, type Range } from '../lib/router'
 import { chartSpecs, isIdle, LiveBuffer, type ChartSpec } from '../lib/series'
 import { onSample, removeMachine, store } from '../lib/store'
@@ -82,6 +82,7 @@ async function load() {
 }
 
 watch(() => [props.name, props.range], load, { immediate: true })
+watch(() => props.name, () => (scopeFilter.value = ''))
 // After the stream reconnects (sleep, network change) refetch the live window so
 // the missed minutes are filled in instead of showing as a false gap.
 watch(
@@ -129,6 +130,24 @@ const diskCols: Column[] = [
 const disks = computed(() =>
   (latest.value?.disks ?? []).map((d) => ({ ...d, pct: d.total_bytes ? (d.used_bytes / d.total_bytes) * 100 : 0 })),
 )
+
+const serviceCols: Column[] = [
+  { key: 'name', label: 'Service' },
+  { key: 'scope', label: 'Scope', format: (_v, r) => scopeLabel(r) },
+  { key: 'active_state', label: 'State' },
+  { key: 'sub_state', label: 'Sub' },
+  { key: 'description', label: 'Description' },
+]
+const svc = computed(() => serviceSummary(latest.value?.systemd?.services))
+/** "" means every scope; otherwise "system" or "user". */
+const scopeFilter = ref('')
+const services = computed(() =>
+  scopeFilter.value ? svc.value.rows.filter((s) => (s.scope ?? 'system') === scopeFilter.value) : svc.value.rows,
+)
+/** Why the list is missing or partial, as reported by the agent. */
+const servicesNote = computed(() => latest.value?.unavailable?.systemd ?? '')
+const runningServices = computed(() => services.value.filter((s) => s.order === 2).length)
+const failedServices = computed(() => services.value.filter((s) => s.order === 0).length)
 
 const netCols: Column[] = [
   { key: 'name', label: 'Interface' },
@@ -195,6 +214,32 @@ async function remove() {
       <DataTable :columns="containerCols" :rows="containers" :dim="(r) => r.state !== 'running'" initial-sort="name" />
     </section>
 
+    <section v-if="services.length || servicesNote" class="panel">
+      <h2>
+        Services
+        <template v-if="services.length">
+          <span class="muted">{{ runningServices }} / {{ services.length }} running</span>
+          <span v-if="failedServices" class="badge crit">{{ failedServices }} failed</span>
+          <span v-else class="muted">· none failed</span>
+        </template>
+        <span v-if="svc.scopes.length > 1" class="filter">
+          <button v-for="f in ['', ...svc.scopes]" :key="f" :class="{ act: scopeFilter === f }" @click="scopeFilter = f">
+            {{ f === '' ? 'All' : f }}
+          </button>
+        </span>
+      </h2>
+      <p v-if="servicesNote" class="muted note">{{ services.length ? 'Not everything could be read: ' : 'Could not read services: ' }}{{ servicesNote }}</p>
+      <DataTable
+        v-if="services.length"
+        :columns="serviceCols"
+        :rows="services"
+        :dim="(r) => r.active_state !== 'active'"
+        initial-sort="order"
+        :max-rows="10"
+        :reset-key="`${name}:${scopeFilter}`"
+      />
+    </section>
+
     <div class="two">
       <section v-if="disks.length" class="panel">
         <h2>Disks</h2>
@@ -230,10 +275,16 @@ h1 { font-size: 20px; margin: 0; }
 h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
 h2 .muted { font-weight: 400; margin-left: 6px; }
 h2 .cur { float: right; font-weight: 600; }
+h2 .filter { float: right; display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; margin-left: 10px; }
+h2 .filter button { border: 0; background: none; font-size: 11px; padding: 2px 8px; color: var(--muted); cursor: pointer; }
+h2 .filter button.act { background: var(--line); color: var(--text); }
+.badge { font-size: 11px; font-weight: 600; border-radius: 8px; padding: 1px 7px; margin-left: 8px; }
+.badge.crit { color: var(--crit); border: 1px solid color-mix(in srgb, var(--crit) 50%, transparent); }
 .toggle { font-size: 12px; margin: 6px 0; }
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; }
 .foot { margin: 12px 0 0; text-align: right; }
 .idle { font-size: 12px; margin: 0 0 12px; }
+.note { font-size: 12px; margin: 0 0 8px; overflow-wrap: anywhere; }
 .danger { color: var(--crit); }
 .err { color: var(--crit); }
 .center { text-align: center; padding: 48px 16px; }

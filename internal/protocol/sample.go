@@ -33,6 +33,7 @@ type Sample struct {
 	Disks        []Disk            `json:"disks,omitempty"`
 	Net          []NetIf           `json:"net,omitempty"`
 	Docker       *Docker           `json:"docker,omitempty"`
+	Systemd      *Systemd          `json:"systemd,omitempty"`
 	Unavailable  map[string]string `json:"unavailable,omitempty"`
 }
 
@@ -92,6 +93,38 @@ type NetIf struct {
 
 type Docker struct {
 	Containers []Container `json:"containers"`
+}
+
+// Systemd reports the state of the machine's systemd services. Per-service
+// history would add a series per unit (a typical host has over a hundred),
+// so only counts are recorded as history; the list itself rides in the
+// latest sample for the dashboard's table. Units from the system manager and
+// from logged-in users' managers are listed together, each labelled by scope.
+type Systemd struct {
+	Services []Service `json:"services"`
+}
+
+// Service is one systemd service unit.
+type Service struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Scope is the manager the unit belongs to: "system" or "user".
+	Scope string `json:"scope,omitempty"`
+	// Owner is the user owning a user-scope unit; empty for system units.
+	Owner       string `json:"owner,omitempty"`
+	LoadState   string `json:"load_state,omitempty"`
+	ActiveState string `json:"active_state,omitempty"`
+	SubState    string `json:"sub_state,omitempty"`
+}
+
+// Running reports whether the unit is currently running.
+func (s Service) Running() bool {
+	return s.ActiveState == "active" && s.SubState == "running"
+}
+
+// Failed reports whether the unit is in the failed state.
+func (s Service) Failed() bool {
+	return s.ActiveState == "failed"
 }
 
 type Container struct {
@@ -177,6 +210,21 @@ func Flatten(s *Sample) []Point {
 			addF(p+"cpu_pct", c.CPUPct)
 			addU(p+"mem", c.MemBytes)
 		}
+	}
+	if sys := s.Systemd; sys != nil {
+		// Counts only: one series per unit would be far too many.
+		running, failed := 0.0, 0.0
+		for _, svc := range sys.Services {
+			if svc.Running() {
+				running++
+			}
+			if svc.Failed() {
+				failed++
+			}
+		}
+		add("systemd.total", float64(len(sys.Services)))
+		add("systemd.running", running)
+		add("systemd.failed", failed)
 	}
 	return pts
 }

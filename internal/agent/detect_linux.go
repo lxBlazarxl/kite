@@ -24,5 +24,6 @@ func Detect(cfg Config) []Collector {
 	if c, ok := NewDocker(cfg.DockerHost); ok {
 		cols = append(cols, c)
 	}
+	cols = append(cols, NewSystemd(cfg.HostRoot))
 	return cols
 }

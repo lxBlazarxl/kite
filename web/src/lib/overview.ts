@@ -1,6 +1,6 @@
 import { flattenSample } from './flatten'
 import { formatAgo, formatWatts, platformLabel } from './format'
-import type { MachineInfo, SampleFrame, SessionInfo } from './types'
+import type { MachineInfo, SampleFrame, Service, SessionInfo } from './types'
 
 export type Level = 'ok' | 'warn' | 'crit'
 
@@ -68,4 +68,39 @@ export function livePointFromFrame(f: SampleFrame): { ts: number; values: Record
 
 export function streamErrorAction(info: SessionInfo): 'login' | 'retry' {
   return info.password_required && !info.logged_in ? 'login' : 'retry'
+}
+
+/** Where a service belongs in the list: failed first, then odd, then running. */
+export function serviceOrder(s: Pick<Service, 'active_state' | 'sub_state'>): number {
+  if (s.active_state === 'failed') return 0
+  return s.active_state === 'active' && s.sub_state === 'running' ? 2 : 1
+}
+
+export interface ServiceSummary {
+  /** Services in the table, each with its sort rank. */
+  rows: (Service & { order: number })[]
+  total: number
+  running: number
+  failed: number
+  /** Distinct scopes present, e.g. ["system", "user"]. */
+  scopes: string[]
+}
+
+/** Summarises a machine's systemd services for the detail page. */
+export function serviceSummary(services: Service[] | undefined): ServiceSummary {
+  const rows = (services ?? []).map((s) => ({ ...s, order: serviceOrder(s) }))
+  const scopes = [...new Set(rows.map((s) => s.scope ?? 'system'))].sort()
+  return {
+    rows,
+    total: rows.length,
+    running: rows.filter((s) => s.order === 2).length,
+    failed: rows.filter((s) => s.order === 0).length,
+    scopes,
+  }
+}
+
+/** Where a service unit came from, e.g. "system" or "user · alice". */
+export function scopeLabel(s: Pick<Service, 'scope' | 'owner'>): string {
+  const scope = s.scope ?? 'system'
+  return s.owner ? `${scope} · ${s.owner}` : scope
 }

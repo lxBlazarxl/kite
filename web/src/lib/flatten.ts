@@ -52,5 +52,12 @@ export function flattenSample(s: Sample): Record<string, number> {
     put(p + 'cpu_pct', c.cpu_pct)
     put(p + 'mem', c.mem_bytes)
   }
+  if (s.systemd) {
+    // Counts only, matching Go protocol.Flatten.
+    const svcs = s.systemd.services ?? []
+    put('systemd.total', svcs.length)
+    put('systemd.running', svcs.filter((x) => x.active_state === 'active' && x.sub_state === 'running').length)
+    put('systemd.failed', svcs.filter((x) => x.active_state === 'failed').length)
+  }
   return out
 }

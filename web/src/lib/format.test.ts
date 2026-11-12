@@ -43,6 +43,8 @@ describe('formatUnit', () => {
     expect(formatUnit('bps', 2202009.6)).toBe('2.1 MB/s')
     expect(formatUnit('watts', 8.199)).toBe('8.2 W')
     expect(formatUnit('celsius', 52.6)).toBe('53°C')
+    expect(formatUnit('count', 148)).toBe('148')
+    expect(formatUnit('count', 0)).toBe('0')
     expect(formatUnit('pct', null)).toBe('')
   })
 })
@@ -69,6 +71,10 @@ describe('yRange', () => {
   it('starts at zero for non-negative data', () => {
     expect(yRange('bps', 0, 0)).toEqual([0, 1024])
     expect(yRange('pct', 3, 40)).toEqual([0, 100])
+  })
+  it('keeps count charts non-negative with a usable top', () => {
+    expect(yRange('count', 0, 0)).toEqual([0, 1])
+    expect(yRange('count', 0, 148)).toEqual([0, 162.8])
   })
 })
 
