@@ -63,6 +63,8 @@ export function formatUnit(unit: Unit, v: number | null | undefined): string {
       return formatWatts(v)
     case 'celsius':
       return `${v.toFixed(0)}°C`
+    case 'count':
+      return String(Math.round(v))
   }
 }
 

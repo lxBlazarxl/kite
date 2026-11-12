@@ -47,6 +47,36 @@ func TestFlattenStoppedContainer(t *testing.T) {
 	}
 }
 
+func TestFlattenSystemdCounts(t *testing.T) {
+	s := &Sample{Systemd: &Systemd{Services: []Service{
+		{Name: "a.service", ActiveState: "active", SubState: "running"},
+		{Name: "b.service", ActiveState: "active", SubState: "exited"},
+		{Name: "c.service", ActiveState: "failed", SubState: "failed"},
+		{Name: "d.service", ActiveState: "inactive", SubState: "dead"},
+	}}}
+	want := map[string]float64{"systemd.total": 4, "systemd.running": 1, "systemd.failed": 1}
+	got := map[string]float64{}
+	for _, p := range Flatten(s) {
+		got[p.Key] = p.Value
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+}
+
+// A machine with systemd but no services still reports zeros, which is
+// different from a machine without systemd at all (no points).
+func TestFlattenSystemdEmpty(t *testing.T) {
+	got := map[string]float64{}
+	for _, p := range Flatten(&Sample{Systemd: &Systemd{}}) {
+		got[p.Key] = p.Value
+	}
+	want := map[string]float64{"systemd.total": 0, "systemd.running": 0, "systemd.failed": 0}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+}
+
 func TestFlattenEmpty(t *testing.T) {
 	if n := len(Flatten(&Sample{})); n != 0 {
 		t.Fatalf("want 0 points, got %d", n)

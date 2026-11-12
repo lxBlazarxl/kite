@@ -32,6 +32,9 @@ Agents push; only the hub needs an open port. The hub stores rows at its own rec
 | Disks: usage and read/write speed | yes (LVM and LUKS aware) | yes (per drive letter) |
 | Network: in/out per interface | yes | yes |
 | Docker containers: state, CPU, memory | yes | yes (Docker Desktop) |
+| systemd services: list and running/failed counts | yes (system and logged-in users) | no |
+
+Systemd services come from the system manager and from each logged-in user's manager, each unit labelled with its scope. User managers are reached through systemd's own socket, which an agent running as root can open even where a session bus would refuse it, and a manager that cannot be read has its reason reported with the sample. History is counts only (`systemd.total`, `systemd.running`, `systemd.failed`); the full unit list rides in the latest sample and is shown as a table, so a machine with a hundred services does not add a hundred series.
 
 Missing data is shown as missing, never as zero. On laptops the NVIDIA GPU is only queried while plugged in and awake, so monitoring never keeps it from sleeping or drains the battery.
 

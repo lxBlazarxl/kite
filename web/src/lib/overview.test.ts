@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { level, livePointFromFrame, overviewRow, sortMachines, streamErrorAction } from './overview'
+import { level, livePointFromFrame, overviewRow, scopeLabel, serviceOrder, serviceSummary, sortMachines, streamErrorAction } from './overview'
 import type { MachineInfo, Sample } from './types'
 
 const GB = 1024 ** 3
@@ -84,5 +84,55 @@ describe('overview', () => {
     expect(streamErrorAction({ password_required: true, logged_in: false })).toBe('login')
     expect(streamErrorAction({ password_required: true, logged_in: true })).toBe('retry')
     expect(streamErrorAction({ password_required: false, logged_in: true })).toBe('retry')
+  })
+
+  it('serviceOrder puts failed first, then odd states, then running', () => {
+    expect(serviceOrder({ active_state: 'failed', sub_state: 'failed' })).toBe(0)
+    expect(serviceOrder({ active_state: 'active', sub_state: 'exited' })).toBe(1)
+    expect(serviceOrder({ active_state: 'inactive', sub_state: 'dead' })).toBe(1)
+    expect(serviceOrder({ active_state: 'active', sub_state: 'running' })).toBe(2)
+    expect(serviceOrder({})).toBe(1)
+  })
+
+  it('serviceSummary counts failed and running', () => {
+    const s = serviceSummary([
+      { name: 'a', active_state: 'failed', sub_state: 'failed' },
+      { name: 'b', active_state: 'failed', sub_state: 'failed' },
+      { name: 'c', active_state: 'active', sub_state: 'running' },
+      { name: 'd', active_state: 'inactive', sub_state: 'dead' },
+    ])
+    expect(s.total).toBe(4)
+    expect(s.running).toBe(1)
+    expect(s.failed).toBe(2)
+    expect(s.rows.map((r) => r.order)).toEqual([0, 0, 2, 1])
+    expect(s.rows[0].name).toBe('a') // original order kept; the table sorts
+  })
+
+  it('serviceSummary handles no systemd at all', () => {
+    expect(serviceSummary(undefined)).toEqual({ rows: [], total: 0, running: 0, failed: 0, scopes: [] })
+  })
+
+  it('serviceSummary lists distinct scopes and keeps them per row', () => {
+    const s = serviceSummary([
+      { name: 'sshd.service', scope: 'system', active_state: 'active', sub_state: 'running' },
+      { name: 'dbus.service', scope: 'system', active_state: 'active', sub_state: 'running' },
+      { name: 'pipewire.service', scope: 'user', owner: 'alice', active_state: 'active', sub_state: 'running' },
+      { name: 'gvfs.service', scope: 'user', owner: 'alice', active_state: 'failed', sub_state: 'failed' },
+    ])
+    expect(s.scopes).toEqual(['system', 'user'])
+    expect(s.total).toBe(4)
+    expect(s.failed).toBe(1)
+    expect(s.rows.filter((r) => r.scope === 'user')).toHaveLength(2)
+  })
+
+  it('treats a missing scope as system', () => {
+    const s = serviceSummary([{ name: 'ssh.service', active_state: 'active', sub_state: 'running' }])
+    expect(s.scopes).toEqual(['system'])
+  })
+
+  it('scopeLabel names the owning user', () => {
+    expect(scopeLabel({ scope: 'system' })).toBe('system')
+    expect(scopeLabel({ scope: 'user', owner: 'alice' })).toBe('user · alice')
+    expect(scopeLabel({})).toBe('system')
   })
 })

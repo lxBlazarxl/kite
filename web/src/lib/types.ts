@@ -62,6 +62,22 @@ export interface Container {
   mem_bytes?: number
 }
 
+export interface Service {
+  name: string
+  description?: string
+  /** "system" or "user": which systemd manager the unit belongs to. */
+  scope?: string
+  /** Owning user for a user-scope unit. */
+  owner?: string
+  load_state?: string
+  active_state?: string
+  sub_state?: string
+}
+
+export interface Systemd {
+  services: Service[]
+}
+
 export interface Sample {
   v: number
   machine: string
@@ -82,6 +98,7 @@ export interface Sample {
   disks?: Disk[]
   net?: NetIf[]
   docker?: { containers: Container[] }
+  systemd?: Systemd
   unavailable?: Record<string, string>
 }
 
