@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -460,11 +461,11 @@ func TestSystemdBusesEmptyRootUsesRealPaths(t *testing.T) {
 }
 
 func TestUserNameFallsBackToUid(t *testing.T) {
-	if got := userName("1000"); got == "" {
+	if got := userName("", "1000"); got == "" {
 		t.Fatal("empty name")
 	}
 	// A uid unlikely to exist must come back as the number itself.
-	if got := userName("64999"); got != "64999" {
+	if got := userName("", "64999"); got != "64999" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -499,5 +500,65 @@ func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+// In a container the agent's own /etc/passwd is the image's, so user names
+// must come from the host's.
+func TestUserNameReadsHostPasswd(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "etc"))
+	passwd := "root:x:0:0:root:/root:/bin/sh\nalice:x:1000:1000::/home/alice:/bin/sh\n"
+	if err := os.WriteFile(filepath.Join(root, "etc", "passwd"), []byte(passwd), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := userName(root, "1000"); got != "alice" {
+		t.Fatalf("got %q, want alice", got)
+	}
+	if got := userName(root, "1001"); got != "1001" {
+		t.Fatalf("unknown uid gave %q", got)
+	}
+}
+
+// The unit cap alone does not bound the size: descriptions escape to several
+// bytes per character in JSON. The section must stay well inside the hub's
+// 1 MiB limit whatever the managers return.
+func TestSystemdCollectorCapsBytes(t *testing.T) {
+	o := newOpener()
+	desc := strings.Repeat("<", maxDescription) // six bytes each once escaped
+	var many []protocol.Service
+	for i := 0; i < maxServicesTotal; i++ {
+		many = append(many, protocol.Service{Name: fmt.Sprintf("u%04d.service", i), Description: desc})
+	}
+	o.byPath[sysPath] = &fakeLister{svcs: many}
+	c := collectorFor([]systemdBus{{Scope: ScopeSystem, Path: sysPath, UID: -1}}, o, time.Millisecond)
+
+	got, err := c.collect()
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	b, _ := json.Marshal(got)
+	if len(b) > maxServicesBytes {
+		t.Fatalf("section is %d bytes, cap is %d", len(b), maxServicesBytes)
+	}
+	if len(got.Services) == 0 {
+		t.Fatal("cap dropped everything")
+	}
+	if !strings.Contains(c.warning(), "KiB") {
+		t.Fatalf("warning = %q", c.warning())
+	}
+}
+
+// A machine without systemd (another init system, WSL) has no system bus
+// socket. That is not a fault, so it must not be flagged on every sample.
+func TestSystemdCollectorQuietWithoutSystemd(t *testing.T) {
+	o := newOpener()
+	o.setFail(sysPath, fmt.Errorf("systemd socket %s: %w", sysPath, os.ErrNotExist))
+	c := collectorFor([]systemdBus{{Scope: ScopeSystem, Path: sysPath, UID: -1}}, o, time.Millisecond)
+	if _, err := c.collect(); err == nil {
+		t.Fatal("collect succeeded with nothing read")
+	}
+	if w := c.warning(); w != "" {
+		t.Fatalf("warning = %q, want none", w)
 	}
 }

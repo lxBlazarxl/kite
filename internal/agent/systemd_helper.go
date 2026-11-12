@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strconv"
@@ -33,14 +34,18 @@ const (
 
 	serviceSuffix = ".service"
 
-	// maxServicesPerBus bounds how many units one manager may contribute, and
-	// maxDescription how long one unit's description may be. A session bus
-	// socket sits in a directory its user owns, so its manager can say
-	// whatever it likes; without bounds one user could return enough units to
-	// push every sample past the hub's 1 MiB limit, which would take the whole
-	// machine offline.
+	// These bound what one manager may contribute. A user manager's socket
+	// sits in a directory its user owns, so it can say whatever it likes;
+	// without bounds one user could return enough to push every sample past
+	// the hub's 1 MiB limit, which would take the whole machine offline.
+	// maxServicesPerBus caps the units, maxDescription a description in
+	// characters, maxState each state field in characters. A name longer than
+	// maxUnitName (systemd's own limit) did not come from systemd, so that
+	// unit is skipped rather than shortened into a different name.
 	maxServicesPerBus = 512
 	maxDescription    = 200
+	maxUnitName       = 256
+	maxState          = 32
 )
 
 // systemdBus is one systemd manager to read.
@@ -77,9 +82,7 @@ func openSystemdBus(b systemdBus, timeout time.Duration) (*SystemdHelper, error)
 	if err := checkBusSocket(b.Path, b.UID); err != nil {
 		return nil, err
 	}
-	conn, err := dialWithin(b.Path, timeout, func() (*systemddbus.Conn, error) {
-		return dialBus(b)
-	})
+	conn, err := dialBus(b, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -88,9 +91,11 @@ func openSystemdBus(b systemdBus, timeout time.Duration) (*SystemdHelper, error)
 
 // checkBusSocket verifies that path is a socket rather than a symlink, and that
 // it belongs to the uid expected for that directory. The agent runs as root and
-// takes this path from a directory its user controls, so both checks matter:
-// a symlink would redirect root at any file, and a socket planted by the user
-// would be their own server answering for the user manager.
+// takes this path from a directory its user controls: refusing symlinks stops
+// that user from pointing root at any other socket, and the owner check stops a
+// socket owned by someone else from being reported as this user's manager. It
+// cannot stop the user from serving a fake manager of their own, which is why
+// what any manager returns is bounded (see ListServices and collect).
 func checkBusSocket(path string, wantUID int) error {
 	// Lstat, not Stat: Stat follows the link and would defeat the check.
 	fi, err := os.Lstat(path)
@@ -113,64 +118,64 @@ func checkBusSocket(path string, wantUID int) error {
 	return nil
 }
 
-// dialBus opens both connections the library needs. The uid is hardcoded as a
-// number to avoid a username lookup.
-func dialBus(b systemdBus) (*systemddbus.Conn, error) {
+// dialBus opens both connections the library needs, one for calls and one for
+// signals. godbus has no timeouts of its own: a socket that accepts and never
+// answers blocks auth, Hello, or the AddMatch call the library makes while
+// setting up, forever. So every socket carries a deadline until setup is done,
+// and a setup that ran out of time is closed and reported rather than left
+// blocked in the background, where each refresh would leak another goroutine
+// and file descriptor. A timeout of zero or less means no deadline.
+func dialBus(b systemdBus, timeout time.Duration) (*systemddbus.Conn, error) {
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
+	var socks []net.Conn
+	closeAll := func() {
+		for _, s := range socks {
+			s.Close()
+		}
+	}
 	uid := strconv.Itoa(os.Getuid())
-	return systemddbus.NewConnection(func() (*dbus.Conn, error) {
-		// Dial performs no handshake, so auth is done here. Connect cannot be
-		// used for a private socket because it insists on Hello.
-		conn, err := dbus.Dial("unix:path=" + b.Path)
+	conn, err := systemddbus.NewConnection(func() (*dbus.Conn, error) {
+		d := net.Dialer{Deadline: deadline}
+		sock, err := d.Dial("unix", b.Path)
 		if err != nil {
 			return nil, err
 		}
+		socks = append(socks, sock)
+		sock.SetDeadline(deadline)
+		conn, err := dbus.NewConn(sock)
+		if err != nil {
+			return nil, err
+		}
+		// EXTERNAL as the agent's own uid. Connect cannot be used: it insists
+		// on Hello, which only a bus daemon answers, not a private socket.
 		if err := conn.Auth([]dbus.Auth{dbus.AuthExternal(uid)}); err != nil {
-			conn.Close()
 			return nil, err
 		}
 		if !b.Private {
 			if err := conn.Hello(); err != nil {
-				conn.Close()
 				return nil, err
 			}
 		}
 		return conn, nil
 	})
-}
-
-// dialWithin calls open but gives up after timeout. The connection cannot be
-// created with a deadline context: the library keeps that context for the
-// connection's lifetime and closes the connection when it is cancelled. So open
-// gets a context that lives as long as the connection does, and the bound is
-// applied here instead. A connection that arrives after the deadline is closed
-// rather than leaked.
-func dialWithin(what string, timeout time.Duration, open func() (*systemddbus.Conn, error)) (*systemddbus.Conn, error) {
-	type dialed struct {
-		conn *systemddbus.Conn
-		err  error
+	if err != nil {
+		closeAll()
+		return nil, fmt.Errorf("systemd %s: %w", b.Path, err)
 	}
-	ch := make(chan dialed, 1)
-	go func() {
-		conn, err := open()
-		ch <- dialed{conn, err}
-	}()
-	if timeout <= 0 {
-		r := <-ch
-		return r.conn, r.err
+	// The library ignores the result of its AddMatch call, so a manager that
+	// stopped answering during setup still comes back as a connection.
+	if !deadline.IsZero() && time.Now().After(deadline) {
+		conn.Close()
+		closeAll()
+		return nil, fmt.Errorf("systemd %s: timed out after %s", b.Path, timeout)
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case r := <-ch:
-		return r.conn, r.err
-	case <-timer.C:
-		go func() {
-			if r := <-ch; r.conn != nil {
-				r.conn.Close()
-			}
-		}()
-		return nil, fmt.Errorf("systemd %s: timed out after %s", what, timeout)
+	for _, s := range socks {
+		s.SetDeadline(time.Time{})
 	}
+	return conn, nil
 }
 
 // Close releases the bus connection.
@@ -195,7 +200,7 @@ func (h *SystemdHelper) ListServices(ctx context.Context) ([]protocol.Service, b
 	out := make([]protocol.Service, 0, len(units))
 	truncated := false
 	for _, u := range units {
-		if !strings.HasSuffix(u.Name, serviceSuffix) {
+		if !strings.HasSuffix(u.Name, serviceSuffix) || len(u.Name) > maxUnitName {
 			continue
 		}
 		if len(out) >= maxServicesPerBus {
@@ -205,9 +210,9 @@ func (h *SystemdHelper) ListServices(ctx context.Context) ([]protocol.Service, b
 		out = append(out, protocol.Service{
 			Name:        u.Name,
 			Description: truncate(u.Description, maxDescription),
-			LoadState:   u.LoadState,
-			ActiveState: u.ActiveState,
-			SubState:    u.SubState,
+			LoadState:   truncate(u.LoadState, maxState),
+			ActiveState: truncate(u.ActiveState, maxState),
+			SubState:    truncate(u.SubState, maxState),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

@@ -3,9 +3,11 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -243,33 +245,130 @@ func TestCheckBusSocketReportsMissingSocket(t *testing.T) {
 	}
 }
 
-func TestDialWithinTimesOut(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
-	_, err := dialWithin("test bus", 20*time.Millisecond, func() (*systemddbus.Conn, error) {
-		<-release
-		return nil, nil
-	})
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("err = %v", err)
+// fakeBusServer listens on a unix socket the way a planted or wedged manager
+// would. With auth set it completes the D-Bus auth handshake and then goes
+// silent; without it, it never says anything. The channel receives once for
+// every connection the client has closed.
+func fakeBusServer(t *testing.T, auth bool) (string, <-chan struct{}) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "private")
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+	closed := make(chan struct{}, 16)
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				if auth {
+					answerAuth(r, c)
+				}
+				io.Copy(io.Discard, r) // returns once the client hangs up
+				closed <- struct{}{}
+			}()
+		}
+	}()
+	return path, closed
+}
+
+// answerAuth plays the server side of EXTERNAL auth up to BEGIN.
+func answerAuth(r *bufio.Reader, w io.Writer) {
+	if _, err := r.ReadByte(); err != nil { // the leading null byte
+		return
+	}
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return
+		}
+		switch {
+		case strings.HasPrefix(line, "AUTH EXTERNAL"):
+			fmt.Fprint(w, "OK 0123456789abcdef0123456789abcdef\r\n")
+		case strings.HasPrefix(line, "AUTH"):
+			fmt.Fprint(w, "REJECTED EXTERNAL\r\n")
+		case strings.HasPrefix(line, "BEGIN"):
+			return
+		}
 	}
 }
 
-func TestDialWithinPropagatesError(t *testing.T) {
-	boom := errors.New("refused")
-	_, err := dialWithin("test bus", time.Second, func() (*systemddbus.Conn, error) {
-		return nil, boom
-	})
-	if !errors.Is(err, boom) {
-		t.Fatalf("err = %v", err)
+func waitClosed(t *testing.T, closed <-chan struct{}, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		select {
+		case <-closed:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%d of %d connections were left open", n-i, n)
+		}
 	}
 }
 
-func TestDialWithinReturnsConnection(t *testing.T) {
-	conn, err := dialWithin("test bus", time.Second, func() (*systemddbus.Conn, error) {
-		return nil, nil
-	})
-	if err != nil || conn != nil {
-		t.Fatalf("conn %v, err %v", conn, err)
+// godbus has no timeouts of its own, so a socket that accepts and never
+// answers used to block the dial forever, leaking a goroutine and a file
+// descriptor on every refresh until the agent ran out of descriptors.
+func TestOpenSystemdBusGivesUpOnSilentSocket(t *testing.T) {
+	path, closed := fakeBusServer(t, false)
+	start := time.Now()
+	_, err := openSystemdBus(systemdBus{Scope: ScopeUser, Path: path, UID: os.Getuid(), Private: true}, 200*time.Millisecond)
+	if err == nil {
+		t.Fatal("a silent socket was accepted as a manager")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("gave up after %s", d)
+	}
+	waitClosed(t, closed, 1)
+}
+
+// The library makes a call of its own (AddMatch) while setting up and waits for
+// the answer without a timeout, so a manager that passes auth and then goes
+// quiet must be cut off too.
+func TestOpenSystemdBusGivesUpWhenSetupStalls(t *testing.T) {
+	path, closed := fakeBusServer(t, true)
+	start := time.Now()
+	_, err := openSystemdBus(systemdBus{Scope: ScopeUser, Path: path, UID: os.Getuid(), Private: true}, 200*time.Millisecond)
+	if err == nil {
+		t.Fatal("a manager that never answered was accepted")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("gave up after %s", d)
+	}
+	waitClosed(t, closed, 2) // one connection for calls, one for signals
+}
+
+// Unit names are at most 256 characters in systemd; anything longer did not
+// come from systemd and could make the sample too big for the hub.
+func TestListServicesSkipsOversizedNames(t *testing.T) {
+	long := strings.Repeat("x", maxUnitName) + ".service"
+	svcs, _, err := newFakeHelper(&fakeSystemd{units: []systemddbus.UnitStatus{
+		{Name: long}, {Name: "ok.service"},
+	}}, time.Second).ListServices(context.Background())
+	if err != nil {
+		t.Fatalf("ListServices: %v", err)
+	}
+	if len(svcs) != 1 || svcs[0].Name != "ok.service" {
+		t.Fatalf("services = %+v", svcs)
+	}
+}
+
+func TestListServicesCapsStates(t *testing.T) {
+	big := strings.Repeat("s", 1000)
+	svcs, _, err := newFakeHelper(&fakeSystemd{units: []systemddbus.UnitStatus{
+		{Name: "a.service", LoadState: big, ActiveState: big, SubState: big},
+	}}, time.Second).ListServices(context.Background())
+	if err != nil {
+		t.Fatalf("ListServices: %v", err)
+	}
+	s := svcs[0]
+	for _, v := range []string{s.LoadState, s.ActiveState, s.SubState} {
+		if len(v) > maxState {
+			t.Fatalf("state is %d bytes, want at most %d", len(v), maxState)
+		}
 	}
 }

@@ -4,6 +4,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -22,9 +24,13 @@ const (
 	// this is far cheaper than querying it on every 5 s sample.
 	systemdEvery = 15 * time.Second
 
-	// maxServicesTotal bounds the whole section, so the sum over many logged-in
-	// users cannot grow without limit either.
+	// maxServicesTotal and maxServicesBytes bound the whole section, so the
+	// sum over many logged-in users cannot grow without limit either. The
+	// byte cap is measured as JSON, where escaping can make one character
+	// six bytes, and leaves the rest of the sample plenty of room under the
+	// hub's 1 MiB limit.
 	maxServicesTotal = 1024
+	maxServicesBytes = 256 << 10
 
 	systemBusSocket = "/run/dbus/system_bus_socket"
 	userRunDir      = "/run/user"
@@ -88,7 +94,7 @@ func systemdBuses(hostRoot string) []systemdBus {
 		if err != nil {
 			continue
 		}
-		if b, ok := userSystemdBus(dir, uid); ok {
+		if b, ok := userSystemdBus(hostRoot, dir, uid); ok {
 			out = append(out, b)
 		}
 	}
@@ -100,8 +106,8 @@ func systemdBuses(hostRoot string) []systemdBus {
 // the uid that owns it, so an agent running as root is refused, while the
 // private socket has no bus daemon to apply that policy. The session bus stays
 // as a fallback for systems without the private socket.
-func userSystemdBus(dir string, uid int) (systemdBus, bool) {
-	owner := userName(strconv.Itoa(uid))
+func userSystemdBus(hostRoot, dir string, uid int) (systemdBus, bool) {
+	owner := userName(hostRoot, strconv.Itoa(uid))
 	if p := filepath.Join(dir, "systemd", "private"); isSocket(p) {
 		return systemdBus{Scope: ScopeUser, Owner: owner, Path: p, UID: uid, Private: true}, true
 	}
@@ -127,12 +133,35 @@ func isSocket(path string) bool {
 }
 
 // userName turns a uid into a login name, falling back to the uid when the
-// lookup fails (the user may be gone from the password database already).
-func userName(uid string) string {
+// lookup fails (the user may be gone from the password database already). In a
+// container (hostRoot set) the names come from the host's /etc/passwd, since
+// the container's own only knows the image's users.
+func userName(hostRoot, uid string) string {
+	if hostRoot != "" {
+		if name := passwdName(filepath.Join(hostRoot, "etc", "passwd"), uid); name != "" {
+			return name
+		}
+		return uid
+	}
 	if u, err := user.LookupId(uid); err == nil && u.Username != "" {
 		return u.Username
 	}
 	return uid
+}
+
+// passwdName finds the login name for uid in a passwd file, or "" if none.
+func passwdName(path, uid string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Split(line, ":")
+		if len(f) >= 3 && f[2] == uid && f[0] != "" {
+			return f[0]
+		}
+	}
+	return ""
 }
 
 // collect reads every manager and merges the units. A user's manager is
@@ -144,6 +173,7 @@ func (c *systemdCollector) collect() (*protocol.Systemd, error) {
 	var problems []string
 	var systemErr error
 	seen := map[string]bool{}
+	size, full := 0, false
 
 	for _, b := range c.buses() {
 		seen[b.Path] = true
@@ -164,13 +194,21 @@ func (c *systemdCollector) collect() (*protocol.Systemd, error) {
 		for _, s := range svcs {
 			if len(out.Services) >= maxServicesTotal {
 				problems = append(problems, fmt.Sprintf("only the first %d units are reported", maxServicesTotal))
+				full = true
 				break
 			}
 			s.Scope = string(b.Scope)
 			s.Owner = b.Owner
+			n := jsonSize(s) + 1 // the comma between entries
+			if size+n > maxServicesBytes {
+				problems = append(problems, fmt.Sprintf("the list is cut at %d KiB", maxServicesBytes>>10))
+				full = true
+				break
+			}
+			size += n
 			out.Services = append(out.Services, s)
 		}
-		if len(out.Services) >= maxServicesTotal {
+		if full {
 			break
 		}
 	}
@@ -184,7 +222,14 @@ func (c *systemdCollector) collect() (*protocol.Systemd, error) {
 		}
 	}
 
-	c.setWarn(strings.Join(problems, "; "))
+	warn := strings.Join(problems, "; ")
+	// No system bus socket and nothing else read means there is no systemd
+	// here at all (another init system, WSL): not a fault, so it is not
+	// flagged on every sample.
+	if len(out.Services) == 0 && len(problems) == 1 && errors.Is(systemErr, os.ErrNotExist) {
+		warn = ""
+	}
+	c.setWarn(warn)
 	if len(out.Services) == 0 && systemErr != nil {
 		return nil, systemErr
 	}
@@ -213,6 +258,12 @@ func (c *systemdCollector) read(b systemdBus) ([]protocol.Service, bool, error) 
 		return nil, false, fmt.Errorf("%s: %w", b.Path, err)
 	}
 	return svcs, truncated, nil
+}
+
+// jsonSize is how many bytes s takes in the sample.
+func jsonSize(s protocol.Service) int {
+	b, _ := json.Marshal(s)
+	return len(b)
 }
 
 func (c *systemdCollector) setWarn(w string) {
